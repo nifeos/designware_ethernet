@@ -119,6 +119,12 @@ installed it. The Kani proofs under "What is proven" are the only part that need
   `vendor_physical_layer_device` decode the properties of a node you found.
 - On the JH7110 the crate drives only `gmac0` (`16030000`); `gmac1`'s clocks have no plan.
 - The API may still change until the driver built on it is complete.
+- No test reaches the receive budget. `DataPlane::receive` stops after `RECEIVE_ENTRIES`
+  descriptors in one call, but the simulator fills the ring only between calls, so at most
+  `RECEIVE_ENTRIES - 1` error frames wait, and
+  `a_ring_full_of_error_frames_is_consumed_in_one_call_and_the_next_good_frame_arrives` ends on an
+  empty descriptor before the budget runs out. With the bound removed, every test still passes. A
+  simulator that refills the ring while `receive` runs would exercise it.
 
 ## Minimum Rust version
 
