@@ -1,0 +1,14 @@
+//! **What the data plane needs from the hardware**, so the simulator can stand in for the MAC.
+
+/// **The controller's register window, as a driver reaches it.** A kernel half implements it as a
+/// pair of volatile accesses into its mapping of the window; the tests implement it with `simulator`. Offsets are bytes from the
+/// window's base, and every one this crate passes is a constant from
+/// [`registers`](crate::registers), below [`registers::REGISTER_WINDOW_BYTES`](crate::registers::REGISTER_WINDOW_BYTES).
+pub trait Hardware {
+    /// Read the 32-bit register at `offset`.
+    fn read(&mut self, offset: u32) -> u32;
+    /// Write `value` to the 32-bit register at `offset`.
+    fn write(&mut self, offset: u32, value: u32);
+    /// Wait at least `microseconds` microseconds.
+    fn delay_microseconds(&mut self, microseconds: u64);
+}

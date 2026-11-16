@@ -1,0 +1,18 @@
+Falsifies `designware_ethernet::proofs::a_delivered_frame_always_fits_the_buffer_and_the_room`.
+
+The defect: the receive verdict forgets the caller's room. Every length the device can state up to
+a full frame is then accepted, so a caller offering a 576-byte buffer is told to copy 1514.
+
+Expected to fail: the harness's `assert!(n <= room)`, on any word with a valid length above room.
+
+diff --git a/src/descriptor.rs b/src/descriptor.rs
+--- a/src/descriptor.rs
++++ b/src/descriptor.rs
+@@ -225,7 +225,6 @@
+         return ReceiveVerdict::Drop;
+     };
+     let fits = (14..=MAXIMUM_FRAME_BYTES).contains(&length)
+-        && length <= room
+         && wire as u64 <= BUFFER_BYTES;
+     if !fits {
+         return ReceiveVerdict::Drop;
