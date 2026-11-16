@@ -43,8 +43,9 @@ pub trait Port: Hardware {
 pub struct Inputs {
     /// The DMA region's physical base, which descriptors name.
     pub region_physical_address: u64,
-    /// (`station_mac_address`, the Institute of Electrical and Electronics Engineers (IEEE) 802.3 standard's name for a media access control (MAC) address) The tree's
-    /// `local-mac-address`, if it has one.
+    /// The station's media access control (MAC) address, the Institute of Electrical and
+    /// Electronics Engineers (IEEE) 802.3 standard's name for it: the tree's `local-mac-address`,
+    /// if it has one.
     #[doc(alias = "mac_address")]
     pub station_mac_address: Option<[u8; 6]>,
     /// (`physical_layer_device_bus_address`, the IEEE 802.3 standard's physical layer device address) The physical layer device's MDIO
