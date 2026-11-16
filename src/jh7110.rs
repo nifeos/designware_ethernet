@@ -133,9 +133,10 @@ pub struct Discovered {
     pub compatible: &'static [u8],
     /// Whether `status` is absent, `"okay"` or `"ok"`.
     pub status_okay: bool,
-    /// `local-mac-address`, which the board's U-Boot writes into the tree it hands over from the
-    /// EEPROM's address (its `fdt_fixup_ethernet`, through the `ethernet0` alias). `None` when the
-    /// tree has none, and then the driver falls back to what the address registers hold.
+    /// The station's media access control (MAC) address, from `local-mac-address`, which the
+    /// board's U-Boot writes into the tree it hands over from the EEPROM's address (its
+    /// `fdt_fixup_ethernet`, through the `ethernet0` alias). `None` when the tree has none, and
+    /// then the driver falls back to what the address registers hold.
     #[doc(alias = "mac_address")]
     pub station_mac_address: Option<[u8; 6]>,
     /// Whether `phy-mode` names an RGMII (reduced gigabit media-independent interface) variant.
