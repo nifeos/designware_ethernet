@@ -1,5 +1,10 @@
 # designware_ethernet
 
+[![check](https://github.com/nifeos/designware_ethernet/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nifeos/designware_ethernet/actions/workflows/ci.yml?query=branch%3Amain)
+[![proofs](https://github.com/nifeos/designware_ethernet/actions/workflows/proofs.yml/badge.svg?branch=main)](https://github.com/nifeos/designware_ethernet/actions/workflows/proofs.yml?query=branch%3Amain)
+[![license](https://img.shields.io/badge/license-%28MIT%20OR%20Apache--2.0%29%20AND%20ISC%20AND%20BSD--2--Clause-blue.svg)](https://github.com/nifeos/designware_ethernet#license)
+[![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/nifeos/designware_ethernet/blob/main/Cargo.toml)
+
 The logic of a driver for the Synopsys DesignWare Ethernet QoS controller (dwmac 4.x and 5.x
 descriptor format), with the glue for the StarFive JH7110 and its Motorcomm `YT8531` physical
 layer device. It holds the register map, the descriptor formats, the direct memory access (DMA)

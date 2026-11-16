@@ -3,3 +3,11 @@
 # nobody says its expansion). A line without a reason is refused. Plurals with `s` or `es` follow.
 #
 # lba  the specifications and every reader say LBA
+designware  Synopsys's product name for the controller family, as its databook spells it
+dwqereg  OpenBSD's `dwqereg.h`, the register header a test checks the bits against
+gmac  the JH7110 manual's and both device trees' name for each controller instance, `gmac0` and `gmac1`
+jh  the first half of the StarFive part number JH7110
+motorcomm  the vendor of the YT8531 physical layer device, as it spells its name
+picoseconds  the unit, spelled out as the naming rules require
+reposted  English: a descriptor handed back to the controller again
+yt  the first half of the Motorcomm part number YT8531
