@@ -17,7 +17,20 @@ use crate::{
 };
 
 /// **What the bring-up drives**: the controller's register window (the [`Hardware`] it is), its
-/// DMA region with the tail registers beside it, and a clock.
+/// DMA region with the tail registers beside it, and a clock. A kernel half implements it over its
+/// mappings of the window and the region; the host tests implement it with `simulator`.
+///
+/// What an implementation guarantees: the [`Hardware`], [`DirectMemoryAccessRegion`] and
+/// [`Tails`] contracts, each for its part. The region [`Port::with_region`] lends is the
+/// [`layout::DIRECT_MEMORY_ACCESS_REGION_BYTES`] at [`Inputs::region_physical_address`], and its
+/// tails are this controller's channel 0 tail registers. The clock never goes backwards.
+///
+/// What the crate guarantees: it never holds the region past one [`Port::with_region`] call, and
+/// it reads the clock only to bound its waits and to report how long they took, so a coarse clock
+/// makes those figures coarse and breaks nothing.
+///
+/// What may be assumed: what [`Hardware`] may assume, the clocks, resets and interface select
+/// already up.
 pub trait Port: Hardware {
     /// The CPU's handle on the DMA region.
     type Region<'a>: DirectMemoryAccessRegion
@@ -33,7 +46,8 @@ pub trait Port: Hardware {
         &mut self,
         f: impl FnOnce(&mut Self::Region<'_>, &mut Self::Tails<'_>) -> R,
     ) -> R;
-    /// A monotonic clock, in microseconds.
+    /// A monotonic clock, in microseconds. It never goes backwards: the bring-up subtracts an
+    /// earlier reading from a later one.
     fn now_microseconds(&mut self) -> u64;
 }
 
