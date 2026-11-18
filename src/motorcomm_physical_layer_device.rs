@@ -17,8 +17,8 @@
 //! why this driver writes them is at each. Every other register and bit here is OpenBSD's. Each
 //! register and bit constant's documentation opens with what it is, then its source's full
 //! spelling and file. The vendor tree states register values and mainline states physical
-//! quantities, and for `gmac0` they agree.
-//! [`Settings::FALLBACK_GMAC0`] applies only when a tree states neither, and [`Settings::source`]
+//! quantities; [`Settings::from_mainline`] converts the second to the first. A caller whose tree
+//! states neither supplies its own, marked [`SettingsSource::Fallback`], and [`Settings::source`]
 //! says which happened.
 
 use crate::link::{Link, Speed};
@@ -241,7 +241,7 @@ pub enum SettingsSource {
     VendorTree,
     /// Mainline Linux's picosecond and microamp properties.
     MainlineTree,
-    /// Neither: [`Settings::FALLBACK_GMAC0`].
+    /// Neither: the caller's own defaults for its board.
     Fallback,
 }
 
@@ -347,18 +347,6 @@ impl Settings {
         })
     }
 
-    /// **the board's `gmac0` (Gigabit MAC, GMAC).** Both trees give these values, so a tree that names
-    /// neither spelling still gets the board it is on, and says so.
-    pub const FALLBACK_GMAC0: Settings = Settings {
-        receive_delay: 0xa,
-        receive_fixed_delay: false,
-        transmit_delay: 0xa,
-        receive_clock_drive: PadDriveStrength::Code(6),
-        receive_data_drive: PadDriveStrength::Code(3),
-        transmit_clock_inverted: [true, true, true],
-        source: SettingsSource::Fallback,
-    };
-
     /// **From mainline's quantities**, by OpenBSD's arithmetic: a receive delay at or past 1.9 ns
     /// that the fixed delay plus whole steps can make uses the fixed delay; both selects round to
     /// the nearest step. A select past the 4-bit field saturates rather than spilling into the
@@ -366,7 +354,8 @@ impl Settings {
     /// tree does not say `motorcomm,tx-clk-adj-enabled`, which means "leave the bit alone" there
     /// and "not inverted" here: the bit is written either way, so it is decided rather than
     /// inherited.
-    pub(crate) fn from_mainline(
+    #[must_use]
+    pub fn from_mainline(
         receive_picoseconds: u32,
         transmit_picoseconds: u32,
         receive_clock_microamps: u32,
@@ -661,19 +650,7 @@ pub fn read_link(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulator::PhysicalLayerDevice;
-
-    #[test]
-    fn the_two_trees_spell_the_same_registers_for_the_boards_gmac0() {
-        let mainline = Settings::from_mainline(1500, 1500, 3970, 2910, Some([false, true, true]));
-        let fallback = Settings::FALLBACK_GMAC0;
-        assert_eq!(mainline.receive_delay, fallback.receive_delay);
-        assert_eq!(mainline.transmit_delay, fallback.transmit_delay);
-        assert_eq!(mainline.receive_fixed_delay, fallback.receive_fixed_delay);
-        assert_eq!(drive_code(1800, mainline.receive_clock_drive), 6);
-        assert_eq!(drive_code(1800, mainline.receive_data_drive), 3);
-        assert_eq!(drive_code(1800, fallback.receive_clock_drive), 6);
-    }
+    use crate::simulator::{PHYSICAL_LAYER_DEVICE_SETTINGS, PhysicalLayerDevice};
 
     #[test]
     fn a_receive_delay_the_fixed_delay_can_make_uses_it() {
@@ -857,7 +834,12 @@ mod tests {
     fn configure_writes_the_boards_registers_and_restores_the_bus_address_port() {
         let mut physical_layer_device = PhysicalLayerDevice::yt8531_at_1800_millivolts();
         physical_layer_device.write_raw(EXTENDED_REGISTER_BUS_ADDRESS_PORT, 0x1234);
-        let a = configure(&mut physical_layer_device, 0, &Settings::FALLBACK_GMAC0).unwrap();
+        let a = configure(
+            &mut physical_layer_device,
+            0,
+            &PHYSICAL_LAYER_DEVICE_SETTINGS,
+        )
+        .unwrap();
         assert_eq!(a.voltage_millivolts, 1800);
         assert_eq!(
             physical_layer_device.extended(
@@ -905,7 +887,7 @@ mod tests {
         let mut physical_layer_device = PhysicalLayerDevice::yt8531_at_1800_millivolts();
         let s = Settings {
             receive_data_drive: PadDriveStrength::Code(7),
-            ..Settings::FALLBACK_GMAC0
+            ..PHYSICAL_LAYER_DEVICE_SETTINGS
         };
         configure(&mut physical_layer_device, 0, &s).unwrap();
         assert_eq!(
@@ -937,7 +919,7 @@ mod tests {
         let mut physical_layer_device = PhysicalLayerDevice::yt8531_at_1800_millivolts();
         let s = Settings {
             transmit_clock_inverted: [false, false, true],
-            ..Settings::FALLBACK_GMAC0
+            ..PHYSICAL_LAYER_DEVICE_SETTINGS
         };
         apply_speed(&mut physical_layer_device, 0, &s, Speed::Thousand).unwrap();
         assert_ne!(
@@ -1019,7 +1001,7 @@ mod tests {
         .unwrap();
         let s = Settings {
             receive_data_drive: PadDriveStrength::Code(7),
-            ..Settings::FALLBACK_GMAC0
+            ..PHYSICAL_LAYER_DEVICE_SETTINGS
         };
         let a = configure(&mut physical_layer_device, 0, &s).unwrap();
         // 0xffff with bits 13:10 and 3:0 replaced by 0xa each.
@@ -1202,14 +1184,14 @@ mod tests {
     #[test]
     fn settings_survive_their_word_and_refuse_what_it_cannot_carry() {
         let mainline = Settings::from_mainline(2200, 1500, 3970, 2910, Some([false, true, true]));
-        for s in [Settings::FALLBACK_GMAC0, mainline] {
+        for s in [PHYSICAL_LAYER_DEVICE_SETTINGS, mainline] {
             let word = s.to_word().unwrap();
             assert_eq!(Settings::from_word(word), Some(s));
         }
         let vendor = Settings {
             source: SettingsSource::VendorTree,
             receive_clock_drive: PadDriveStrength::Code(7),
-            ..Settings::FALLBACK_GMAC0
+            ..PHYSICAL_LAYER_DEVICE_SETTINGS
         };
         assert_eq!(Settings::from_word(vendor.to_word().unwrap()), Some(vendor));
         let too_far = Settings {
@@ -1222,7 +1204,7 @@ mod tests {
             ..mainline
         };
         assert_eq!(past_field.to_word(), None);
-        let word = Settings::FALLBACK_GMAC0.to_word().unwrap();
+        let word = PHYSICAL_LAYER_DEVICE_SETTINGS.to_word().unwrap();
         assert_eq!(
             Settings::from_word(word | 0x3 << 12),
             None,

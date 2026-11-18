@@ -5,15 +5,15 @@
 //! drives the silicon and the host tests that drive the simulation run the same code.
 //!
 //! The clocks, the resets and the board's interface select come first and are not here: they sit
-//! in windows the controller does not own.
+//! in windows the controller does not own. So does everything a board's device tree says, which
+//! the caller hands over in [`Inputs`].
 
 use crate::cache_coherence::{self, Observation, Verdict};
 use crate::link::{Link, Speed};
 use crate::motorcomm_physical_layer_device::{self, Settings, SettingsSource};
-use crate::network_interface_controller::{self as controller, Identity};
+use crate::network_interface_controller::{self as controller, BusConfiguration, Identity};
 use crate::{
-    DataPlane, DirectMemoryAccessRegion, Hardware, Tails, jh7110, layout, management_data_io,
-    registers,
+    DataPlane, DirectMemoryAccessRegion, Hardware, Tails, layout, management_data_io, registers,
 };
 
 /// **What the bring-up drives**: the controller's register window (the [`Hardware`] it is), its
@@ -43,6 +43,10 @@ pub trait Port: Hardware {
 pub struct Inputs {
     /// The DMA region's physical base, which descriptors name.
     pub region_physical_address: u64,
+    /// How the controller's DMA meets the system bus on this board: the `snps,*` properties of
+    /// the port's node and its `snps,axi-config` node. Both the coherence probe and the real
+    /// configuration program it.
+    pub bus_configuration: BusConfiguration,
     /// The station's media access control (MAC) address, the Institute of Electrical and
     /// Electronics Engineers (IEEE) 802.3 standard's name for it: the tree's `local-mac-address`,
     /// if it has one.
@@ -173,7 +177,7 @@ pub fn bring_up(
     // The PHY keeps its receive clock running from here on, which the reset needs.
     account.resets_microseconds[0] = controller::soft_reset(port).map_err(Error::Controller)?;
 
-    let verdict = probe(port, &id, inputs.region_physical_address, station, account)?;
+    let verdict = probe(port, &id, inputs, station, account)?;
     if !matches!(verdict, Verdict::Coherent | Verdict::Inconclusive) {
         return Err(Error::NotCoherent(verdict));
     }
@@ -185,7 +189,7 @@ pub fn bring_up(
     controller::configure(
         port,
         &id,
-        &jh7110::BUS_CONFIGURATION,
+        &inputs.bus_configuration,
         inputs.region_physical_address,
         station,
     )
@@ -270,12 +274,13 @@ fn wait_for_link(
 fn probe(
     port: &mut impl Port,
     id: &Identity,
-    region: u64,
+    inputs: &Inputs,
     station: [u8; 6],
     account: &mut Account,
 ) -> Result<Verdict, Error> {
+    let region = inputs.region_physical_address;
     zero(port);
-    controller::configure(port, id, &jh7110::BUS_CONFIGURATION, region, station)
+    controller::configure(port, id, &inputs.bus_configuration, region, station)
         .map_err(Error::Controller)?;
     let loopback = Link {
         speed: Speed::Thousand,
@@ -314,7 +319,9 @@ fn zero(port: &mut impl Port) {
 mod tests {
     use super::*;
     use crate::management_data_io::PHYSICAL_LAYER_DEVICE_ID_1_REGISTER;
-    use crate::simulator::{Memory, NetworkInterfaceController};
+    use crate::simulator::{
+        BUS_CONFIGURATION, Memory, NetworkInterfaceController, PHYSICAL_LAYER_DEVICE_SETTINGS,
+    };
 
     const REGION: u64 = 0x4800_0000;
     const STATION: [u8; 6] = [0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c];
@@ -326,9 +333,10 @@ mod tests {
     fn inputs() -> Inputs {
         Inputs {
             region_physical_address: REGION,
+            bus_configuration: BUS_CONFIGURATION,
             station_mac_address: Some(STATION),
             physical_layer_device_bus_address: 0,
-            physical_layer_device: Settings::FALLBACK_GMAC0,
+            physical_layer_device: PHYSICAL_LAYER_DEVICE_SETTINGS,
         }
     }
 
@@ -338,7 +346,7 @@ mod tests {
         p
     }
 
-    /// The whole sequence on the machine every source says the JH7110 is: it ends started at the
+    /// The whole sequence on a coherent machine: it ends started at the
     /// link's speed, out of loopback, with the probe's verdict and both resets on the account.
     #[test]
     fn a_coherent_port_with_a_link_comes_up_started_and_out_of_loopback() {

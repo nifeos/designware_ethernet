@@ -6,12 +6,14 @@
 [![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/nifeos/designware_ethernet/blob/main/Cargo.toml)
 
 The logic of a driver for the Synopsys DesignWare Ethernet QoS controller (dwmac 4.x and 5.x
-descriptor format), with the glue for the StarFive JH7110 and its Motorcomm `YT8531` physical
-layer device. It holds the register map, the descriptor formats, the direct memory access (DMA)
+descriptor format) and its Motorcomm `YT8531` physical layer device. It holds the register map, the descriptor formats, the direct memory access (DMA)
 region's layout, the receive and transmit rings, and the controller and physical layer device bring-up sequences. It
 also holds MDIO (management data input/output) and a probe that measures whether device DMA is
-coherent with the CPU's caches. The board is the StarFive VisionFive 2, which has two device trees,
-mainline Linux's and the vendor's own; the crate reads both. It is `no_std` and needs no allocator.
+coherent with the CPU's caches. It knows no system-on-chip: the register window, the bus
+configuration (`network_interface_controller::BusConfiguration`) and the physical layer device's
+settings come from the caller in `bring_up::Inputs`, and `Settings::from_mainline` converts the
+mainline device-tree spelling of the delays and drive currents. It has run on a StarFive
+VisionFive 2. It is `no_std` and needs no allocator.
 
 It dereferences no pointer and touches no hardware. You supply register access through the
 `Hardware` trait, the DMA region through `DirectMemoryAccessRegion`, and the tail-pointer writes and
@@ -114,10 +116,9 @@ installed it. The Kani proofs under "What is proven" are the only part that need
 
 - The tests run only against the simulator, not against a device.
 - One receive and one transmit queue, polled: no interrupts, offloads, jumbo frames or multicast.
-- The crate reads no device tree. The `jh7110` module names the compatible strings and node names
-  to look for, and `Discovered::from_node`, `mainline_physical_layer_device` and
-  `vendor_physical_layer_device` decode the properties of a node you found.
-- On the JH7110 the crate drives only `gmac0` (`16030000`); `gmac1`'s clocks have no plan.
+- The crate reads no device tree and names no system-on-chip. Finding the port's node, its bus
+  configuration and its physical layer device's properties, and the clocks, resets and interface
+  select around the controller, are the caller's.
 - The API may still change until the driver built on it is complete.
 - No test reaches the receive budget. `DataPlane::receive` stops after `RECEIVE_ENTRIES`
   descriptors in one call, but the simulator fills the ring only between calls, so at most

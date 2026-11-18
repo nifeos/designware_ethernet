@@ -14,7 +14,8 @@ use std::vec::Vec;
 
 use crate::link::{Link, Speed};
 use crate::management_data_io::{self, ManagementDataIo};
-use crate::network_interface_controller::{self as controller, Identity};
+use crate::motorcomm_physical_layer_device::{PadDriveStrength, Settings, SettingsSource};
+use crate::network_interface_controller::{self as controller, BusConfiguration, Identity};
 use crate::{
     DirectMemoryAccessRegion, Hardware, RECEIVE_DESCRIPTOR_WORD_3_ERROR_SUMMARY,
     RECEIVE_DESCRIPTOR_WORD_3_FIRST_DESCRIPTOR, RECEIVE_DESCRIPTOR_WORD_3_LAST_DESCRIPTOR,
@@ -25,6 +26,36 @@ use crate::{
 };
 
 const LINE: u64 = 64;
+
+/// The bus configuration the tests program: fixed bursts of 16 beats on each channel, threshold
+/// mode, every system bus burst length from 32 to 256 beats, and 15 outstanding requests each way.
+pub(crate) const BUS_CONFIGURATION: BusConfiguration = BusConfiguration {
+    fixed_burst: true,
+    channel_burst_beats_times_8: false,
+    transmit_channel_burst_beats: 16,
+    receive_channel_burst_beats: 16,
+    threshold_mode: true,
+    bus_burst_beats_permitted:
+        registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_BURST_256_BEATS_PERMITTED
+            | registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_BURST_128_BEATS_PERMITTED
+            | registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_BURST_64_BEATS_PERMITTED
+            | registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_BURST_32_BEATS_PERMITTED,
+    read_outstanding: 0xf,
+    write_outstanding: 0xf,
+};
+
+/// The physical layer device settings the tests configure, as a caller's own defaults
+/// ([`SettingsSource::Fallback`]): delay selects of 10 each way, receive clock and data drive codes
+/// 6 and 3, and the transmit clock inverted at every speed.
+pub(crate) const PHYSICAL_LAYER_DEVICE_SETTINGS: Settings = Settings {
+    receive_delay: 0xa,
+    receive_fixed_delay: false,
+    transmit_delay: 0xa,
+    receive_clock_drive: PadDriveStrength::Code(6),
+    receive_data_drive: PadDriveStrength::Code(3),
+    transmit_clock_inverted: [true, true, true],
+    source: SettingsSource::Fallback,
+};
 
 /// How the CPU's view of memory relates to the device's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +87,7 @@ impl Memory {
             mode,
         }
     }
-    /// The machine every published source says the JH7110 is.
+    /// A machine whose device and CPU share one view of memory.
     pub(crate) fn coherent(base: u64) -> Memory {
         Memory::new(base, Mode::Coherent)
     }
@@ -454,7 +485,7 @@ impl NetworkInterfaceController {
         controller::configure(
             self,
             &id,
-            &crate::jh7110::BUS_CONFIGURATION,
+            &BUS_CONFIGURATION,
             region,
             [0x6c, 0xcf, 0x39, 0, 0x47, 0x2c],
         )
