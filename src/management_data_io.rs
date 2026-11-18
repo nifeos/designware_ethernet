@@ -172,6 +172,7 @@ pub(crate) const PHYSICAL_LAYER_DEVICE_ID_2_REGISTER: u8 = 0x03;
 
 /// Why an MDIO command did not complete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// The busy bit stayed set for [`COMMAND_LIMIT_MICROSECONDS`]: the MAC's CSR clock is off, or the
     /// command never started.

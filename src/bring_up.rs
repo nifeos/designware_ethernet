@@ -67,6 +67,7 @@ const LINK_POLL_MICROSECONDS: u64 = 10_000;
 
 /// Why the bring-up refused the port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// The controller's version register read as nothing (zero or all ones): its clocks or resets
     /// are not up, or the window is wrong.
@@ -96,6 +97,7 @@ pub enum Error {
 /// came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[doc(alias = "mac_address_source")]
+#[non_exhaustive]
 pub enum AddressSource {
     /// The tree's `local-mac-address`, which U-Boot writes from the board's electrically erasable programmable read-only memory (EEPROM).
     Tree,
@@ -106,6 +108,7 @@ pub enum AddressSource {
 /// **Everything the bring-up saw**, filled as far as it got, so a refusal still says where it
 /// stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct Account {
     /// The controller's version register.
     pub version: u32,

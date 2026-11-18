@@ -12,6 +12,7 @@ use crate::{BUFFER_BYTES, Hardware, RECEIVE_ENTRIES, TRANSMIT_ENTRIES, layout, r
 
 /// Why the controller was not brought up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// The software reset did not self-clear in [`RESET_LIMIT_MICROSECONDS`]. On this controller the usual
     /// cause is a missing receive clock from the physical layer device, which the reset needs to complete.
@@ -32,6 +33,7 @@ pub const RESET_LIMIT_MICROSECONDS: u64 = 300_000;
 
 /// What the controller says it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Identity {
     /// [`registers::CORE_VERSION_REGISTER`].
     pub version: u32,

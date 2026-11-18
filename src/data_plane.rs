@@ -31,6 +31,7 @@ pub trait Tails {
 
 /// Why a frame was not queued.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TransmitError {
     /// Empty, or longer than [`MAXIMUM_FRAME_BYTES`].
     BadLength,

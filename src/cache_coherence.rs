@@ -81,6 +81,7 @@ pub fn is_delivered(region: &impl DirectMemoryAccessRegion) -> bool {
 
 /// What receive buffer 0 held when it was read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Payload {
     /// The probe frame, byte for byte.
     Matches,
@@ -93,6 +94,7 @@ pub enum Payload {
 /// Everything the probe saw: the CPU's view of the ring and buffer, and the device's view of
 /// itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Observation {
     /// Receive descriptor 0's word 3, read by the CPU.
     pub receive_descriptor_word_3: u32,
@@ -133,6 +135,7 @@ pub fn observe(
 
 /// The probe's answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Verdict {
     /// **Coherent in both directions.** The device read descriptors and a payload the CPU had
     /// only written into its cache, and the CPU read a descriptor and a payload over lines it had
