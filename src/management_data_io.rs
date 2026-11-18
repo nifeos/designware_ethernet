@@ -172,6 +172,7 @@ pub(crate) const PHYSICAL_LAYER_DEVICE_ID_2_REGISTER: u8 = 0x03;
 
 /// Why an MDIO command did not complete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// The busy bit stayed set for [`COMMAND_LIMIT_MICROSECONDS`]: the MAC's CSR clock is off, or the
     /// command never started.
@@ -222,8 +223,23 @@ pub(crate) const COMMAND_WORD_FIELDS_DO_NOT_OVERLAP: () = assert!(
             ^ COMMAND_BUSY
 );
 
-/// **A management data input/output (MDIO) bus**: a clause 22 physical layer device register file, reached somehow.
-/// The MAC's MDIO pair is one implementation ([`Bus`]); a test's simulated physical layer device is another.
+/// **A management data input/output (MDIO) bus**: a clause 22 physical layer device register file,
+/// reached somehow. The MAC's MDIO pair is one implementation ([`Bus`]); a test's simulated
+/// physical layer device is another.
+///
+/// What the crate guarantees: every `register` it passes is a clause 22 register, below 32. A
+/// `physical_layer_device_bus_address` is the caller's, from the device tree, and [`Bus`] reduces
+/// both to the command's five-bit fields rather than let either spill into the other.
+///
+/// What an implementation guarantees: each call is one complete MDIO transaction, finished before
+/// it returns, and a read answers what the device holds now, never a value kept from an earlier
+/// read. Physical layer device registers change on their own (the link status, autonegotiation's
+/// progress), so a read is never elided or served from a cache. The order of calls is the order on
+/// the bus: the vendor's extended registers are reached through an address write followed by a
+/// data access, and the two must not be reordered or interleaved with another caller's.
+///
+/// What may be assumed: an [`Error`] means the transaction did not complete. The crate's sequences
+/// return it at once rather than retry, and the bring-up stops there.
 #[doc(alias = "mdio")]
 pub trait ManagementDataIo {
     /// Read register `register` of the physical layer device at `physical_layer_device_bus_address`.

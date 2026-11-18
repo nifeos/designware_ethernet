@@ -122,6 +122,7 @@ pub const fn gmac0_interface_select(word: u32) -> u32 {
 
 /// What the tree says about the first port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Discovered {
     /// The physical address of the window holding the controller's registers.
     pub registers_physical_address: u64,
@@ -295,6 +296,7 @@ pub fn vendor_physical_layer_device<'t, E>(
 /// said so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[doc(alias = "syscon")]
+#[non_exhaustive]
 pub struct SystemController {
     /// Physical base address.
     pub base_physical_address: u64,
