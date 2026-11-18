@@ -80,7 +80,8 @@ pub(crate) const EXTENDED_CHIP_CONFIGURATION_REGISTER: u16 = 0xa001;
 #[doc(alias = "YT8521_RXC_DLY_EN")]
 pub(crate) const RECEIVE_CLOCK_DELAY_ENABLE: u16 = 1 << 8;
 /// **Chip configuration, low-dropout regulator voltage field** (`YT8521_CFG_LDO_MASK`, `ytphy.c`).
-/// The RGMII I/O voltage the physical layer device's low-dropout (LDO) regulator is strapped to.
+/// The reduced gigabit media independent interface (RGMII) I/O voltage the physical layer device's
+/// low-dropout (LDO) regulator is strapped to.
 #[doc(alias = "chip configuration, low-dropout regulator voltage field")]
 #[doc(alias = "YT8521_CFG_LDO_MASK")]
 pub(crate) const LOW_DROPOUT_REGULATOR_VOLTAGE_MASK: u16 = 0x3 << 4;
