@@ -3,7 +3,7 @@
 Dates are UTC. One line per release, what changed and why, so a reader of the diff has the
 sentence beside it.
 
-## Unreleased
+## 0.1.0-pre.1
 
 - First version.
 - Breaking: the `jh7110` module is gone, with `Discovered`, `SystemController`, the compatible
