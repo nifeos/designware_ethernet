@@ -90,17 +90,40 @@ Six Kani harnesses, in `src/proofs.rs`:
 
 The proofs need Kani, which `rustup` does not install. Run `cargo install --locked
 kani-verifier --version 0.68.0`, then `cargo kani setup`. The setup step downloads a model
-checker, so it needs network access. CI uses version 0.68.0, and another version may verify
-differently.
+checker and a pinned nightly Rust toolchain, so it needs network access. CI uses version 0.68.0,
+and another version may verify differently.
 
-Rerun them all with `cargo kani`, or one of them with `cargo kani --harness <name>`.
+Run them all from the crate root with `cargo kani`, or one of them with
+`cargo kani --harness <name>`, where `<name>` is a harness name from the list above. On a
+passing run, all six finish in about five seconds once the crate has compiled. The first
+`cargo install` and `cargo kani setup` take minutes.
+
+A passing run still prints alarming things. Around seventeen compiler warnings, "trailing
+semicolon in macro used in expression position", come from the crate's compile-time assertions
+and are harmless. The log lists each check, then ends with `VERIFICATION:- SUCCESSFUL` and
+`Complete - 6 successfully verified harnesses, 0 failures, 6 total.` Anything else is a real
+failure.
 
 ### Running one falsification patch
 
 Each harness has a falsification record at `falsifications/<module.path>.<harness>.patch`. Applying
 it with `patch -p1 < <file>` from the crate root makes that harness fail at its own assertion, which
-shows the proof checks something; the patch header names the assertion. `patch -R -p1 < <file>`
-takes it out again.
+shows the proof checks something; the patch header names the assertion. The file name is the
+module `proofs`, then the harness name, so the patch for `every_ring_offset_is_inside_the_region`
+is `falsifications/proofs.every_ring_offset_is_inside_the_region.patch`. You need the `patch`
+program. For example:
+
+```sh
+patch -p1 < falsifications/proofs.every_ring_offset_is_inside_the_region.patch
+cargo kani --harness every_ring_offset_is_inside_the_region
+patch -R -p1 < falsifications/proofs.every_ring_offset_is_inside_the_region.patch
+git status --short   # prints nothing once the patch is out
+```
+
+The middle command is meant to fail: it prints a `Failed Checks:` line naming the assertion,
+`VERIFICATION:- FAILED`, and `Complete - 0 successfully verified harnesses, 1 failures, 1 total.`,
+and exits with a non-zero status. A run that passes means the patch did not apply or the proof
+checks nothing.
 
 MDIO sequencing, the physical layer device configuration writes and controller bring-up have unit tests against the simulator but no proof.
 
@@ -110,7 +133,7 @@ MDIO sequencing, the physical layer device configuration writes and controller b
 `cargo test` runs the unit tests against the simulated controller and the example above as a
 documentation test. The crate is `no_std`, so `cargo build --target riscv64imac-unknown-none-elf`
 builds it for the bare-metal board target once `rustup target add riscv64imac-unknown-none-elf` has
-installed it. The Kani proofs under "What is proven" are the only part that needs extra tools.
+installed it. No feature flag is needed for any of these commands. The Kani proofs under "What is proven" are the only part that needs extra tools.
 
 ## BUGS
 
@@ -129,7 +152,8 @@ installed it. The Kani proofs under "What is proven" are the only part that need
 
 ## Minimum Rust version
 
-Rust 1.88.
+Rust 1.88. To check it, run `rustup toolchain install 1.88 --profile minimal`, then
+`cargo +1.88 build` and `cargo +1.88 test`. Both pass.
 
 ## License
 
