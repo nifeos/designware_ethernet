@@ -388,9 +388,11 @@ impl Settings {
     }
 }
 
-/// **The pad drive code for current current at current voltage**, OpenBSD's `ytphy_yt8531_ds_map`. Unknown
-/// pairs, which includes everything at 2.5 V, get the part's default of 3, as there.
-pub(crate) fn drive_code(voltage_millivolts: u32, strength: PadDriveStrength) -> u8 {
+/// **The pad drive code for a current at a voltage**, OpenBSD's `ytphy_yt8531_ds_map`, or `None`
+/// for a pair the table has no code for, which includes everything at 2.5 V. OpenBSD writes the
+/// part's default of 3 for such a pair and goes on, and so does [`configure`], which says so in
+/// [`Applied`]; Linux refuses the probe instead (`yt8531_set_ds`).
+pub(crate) fn mapped_drive_code(voltage_millivolts: u32, strength: PadDriveStrength) -> Option<u8> {
     const MAP: [(u32, u32, u8); 16] = [
         (1800, 1200, 0),
         (1800, 2100, 1),
@@ -410,11 +412,11 @@ pub(crate) fn drive_code(voltage_millivolts: u32, strength: PadDriveStrength) ->
         (3300, 6140, 7),
     ];
     match strength {
-        PadDriveStrength::Code(code) => code & 0x7,
+        PadDriveStrength::Code(code) => Some(code & 0x7),
         PadDriveStrength::Microamps(microamps) => MAP
             .iter()
             .find(|&&(voltage, current, _)| voltage == voltage_millivolts && current == microamps)
-            .map_or(3, |&(_, _, code)| code),
+            .map(|&(_, _, code)| code),
     }
 }
 
@@ -486,22 +488,58 @@ pub struct Applied {
     pub reduced_gigabit_media_independent_interface_configuration_1: u16,
     /// The pad drive word after the write.
     pub pad_drive: u16,
+    /// The receive clock drive was a current the table has no code for at this voltage, so the
+    /// part's default code 3 was written in its place.
+    pub receive_clock_drive_defaulted: bool,
+    /// The receive data drive was a current the table has no code for at this voltage, so the
+    /// part's default code 3 was written in its place.
+    pub receive_data_drive_defaulted: bool,
 }
 
 /// **Configure the physical layer device for the board**, OpenBSD's order: the receive delay enable, both delay
 /// selects, the drive strengths at the voltage the physical layer device reports, the clock output off; then this
 /// driver's two additions, the clocks kept running with no cable. The extended-address port is
 /// restored at the end, as OpenBSD does, so a firmware access interleaved before or after finds
-/// it where it left it.
+/// it where it left it; it is restored when a step fails too, and the step's error is the one
+/// returned.
 pub fn configure(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
     settings: &Settings,
 ) -> Result<Applied, management_data_io::Error> {
+    with_extended_port_restored(bus, physical_layer_device_bus_address, |bus| {
+        configure_extended_registers(bus, physical_layer_device_bus_address, settings)
+    })
+}
+
+/// Save the extended-address port, run `body`, and put the port back whether `body` succeeded or
+/// not. `body`'s error wins over the restore's, since it is the first thing that went wrong.
+fn with_extended_port_restored<Bus: ManagementDataIo, T>(
+    bus: &mut Bus,
+    physical_layer_device_bus_address: u8,
+    body: impl FnOnce(&mut Bus) -> Result<T, management_data_io::Error>,
+) -> Result<T, management_data_io::Error> {
     let saved = bus.read(
         physical_layer_device_bus_address,
         EXTENDED_REGISTER_BUS_ADDRESS_PORT,
     )?;
+    let result = body(bus);
+    let restored = bus.write(
+        physical_layer_device_bus_address,
+        EXTENDED_REGISTER_BUS_ADDRESS_PORT,
+        saved,
+    );
+    let value = result?;
+    restored?;
+    Ok(value)
+}
+
+/// [`configure`]'s steps between the save and the restore of the extended-address port.
+fn configure_extended_registers(
+    bus: &mut impl ManagementDataIo,
+    physical_layer_device_bus_address: u8,
+    settings: &Settings,
+) -> Result<Applied, management_data_io::Error> {
     let delay_enable = if settings.receive_fixed_delay {
         RECEIVE_CLOCK_DELAY_ENABLE
     } else {
@@ -524,9 +562,10 @@ pub fn configure(
         0xf << RECEIVE_DELAY_SELECT_SHIFT | 0xf << TRANSMIT_DELAY_SELECT_SHIFT,
         delays,
     )?;
-    let receive_clock_code =
-        u16::from(drive_code(voltage_millivolts, settings.receive_clock_drive));
-    let receive_data_code = u16::from(drive_code(voltage_millivolts, settings.receive_data_drive));
+    let receive_clock_mapped = mapped_drive_code(voltage_millivolts, settings.receive_clock_drive);
+    let receive_data_mapped = mapped_drive_code(voltage_millivolts, settings.receive_data_drive);
+    let receive_clock_code = u16::from(receive_clock_mapped.unwrap_or(3));
+    let receive_data_code = u16::from(receive_data_mapped.unwrap_or(3));
     let pad_drive = modify_extended(
         bus,
         physical_layer_device_bus_address,
@@ -559,15 +598,12 @@ pub fn configure(
         SLEEP_CONTROL_1_SLEEP_SWITCH,
         0,
     )?;
-    bus.write(
-        physical_layer_device_bus_address,
-        EXTENDED_REGISTER_BUS_ADDRESS_PORT,
-        saved,
-    )?;
     Ok(Applied {
         voltage_millivolts,
         reduced_gigabit_media_independent_interface_configuration_1,
         pad_drive,
+        receive_clock_drive_defaulted: receive_clock_mapped.is_none(),
+        receive_data_drive_defaulted: receive_data_mapped.is_none(),
     })
 }
 
@@ -584,7 +620,8 @@ pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_DELAY_AND_DRIVE_FIE
 );
 
 /// **Set the transmit clock's inversion for the speed just negotiated**, OpenBSD's
-/// `ytphy_yt8521_update`. Returns the new RGMII configuration word.
+/// `ytphy_yt8521_update`. Returns the new RGMII configuration word. The extended-address port is
+/// saved and restored as [`configure`] does, on failure too.
 pub fn apply_speed(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -596,24 +633,16 @@ pub fn apply_speed(
         Speed::Hundred => settings.transmit_clock_inverted[1],
         Speed::Thousand => settings.transmit_clock_inverted[2],
     };
-    let saved = bus.read(
-        physical_layer_device_bus_address,
-        EXTENDED_REGISTER_BUS_ADDRESS_PORT,
-    )?;
     let set = if inverted { TRANSMIT_CLOCK_SELECT } else { 0 };
-    let value = modify_extended(
-        bus,
-        physical_layer_device_bus_address,
-        EXTENDED_REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_CONFIGURATION_1_REGISTER,
-        TRANSMIT_CLOCK_SELECT,
-        set,
-    )?;
-    bus.write(
-        physical_layer_device_bus_address,
-        EXTENDED_REGISTER_BUS_ADDRESS_PORT,
-        saved,
-    )?;
-    Ok(value)
+    with_extended_port_restored(bus, physical_layer_device_bus_address, |bus| {
+        modify_extended(
+            bus,
+            physical_layer_device_bus_address,
+            EXTENDED_REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_CONFIGURATION_1_REGISTER,
+            TRANSMIT_CLOCK_SELECT,
+            set,
+        )
+    })
 }
 
 /// **The link, if there is one**, read from the standard clause 22 registers the way OpenBSD's
@@ -675,10 +704,131 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_current_gets_the_parts_default_drive() {
-        assert_eq!(drive_code(2500, PadDriveStrength::Microamps(3970)), 3);
-        assert_eq!(drive_code(1800, PadDriveStrength::Microamps(1)), 3);
-        assert_eq!(drive_code(3300, PadDriveStrength::Microamps(6140)), 7);
+    fn an_unknown_current_has_no_code_and_a_known_one_has_its_own() {
+        assert_eq!(
+            mapped_drive_code(2500, PadDriveStrength::Microamps(3970)),
+            None
+        );
+        assert_eq!(
+            mapped_drive_code(1800, PadDriveStrength::Microamps(1)),
+            None
+        );
+        assert_eq!(
+            mapped_drive_code(3300, PadDriveStrength::Microamps(6140)),
+            Some(7)
+        );
+        assert_eq!(
+            mapped_drive_code(1800, PadDriveStrength::Code(0xf)),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn an_unknown_current_writes_the_parts_default_and_applied_says_so() {
+        let mut physical_layer_device = PhysicalLayerDevice::yt8531_at_1800_millivolts();
+        let settings = Settings {
+            receive_clock_drive: PadDriveStrength::Microamps(1),
+            receive_data_drive: PadDriveStrength::Microamps(3970),
+            ..PHYSICAL_LAYER_DEVICE_SETTINGS
+        };
+        let a = configure(&mut physical_layer_device, 0, &settings).unwrap();
+        assert!(a.receive_clock_drive_defaulted);
+        assert!(!a.receive_data_drive_defaulted);
+        assert_eq!(
+            physical_layer_device.extended(EXTENDED_PAD_DRIVE_STRENGTH_REGISTER) >> 13,
+            3
+        );
+        let a = configure(
+            &mut physical_layer_device,
+            0,
+            &PHYSICAL_LAYER_DEVICE_SETTINGS,
+        )
+        .unwrap();
+        assert!(!a.receive_clock_drive_defaulted);
+        assert!(!a.receive_data_drive_defaulted);
+    }
+
+    /// A bus over the simulated device whose writes to the data port fail once `allowed` of them
+    /// have gone through.
+    struct FailingDataWrites {
+        physical_layer_device: PhysicalLayerDevice,
+        allowed: u32,
+    }
+
+    impl ManagementDataIo for FailingDataWrites {
+        fn read(
+            &mut self,
+            physical_layer_device_bus_address: u8,
+            register: u8,
+        ) -> Result<u16, management_data_io::Error> {
+            self.physical_layer_device
+                .read(physical_layer_device_bus_address, register)
+        }
+
+        fn write(
+            &mut self,
+            physical_layer_device_bus_address: u8,
+            register: u8,
+            value: u16,
+        ) -> Result<(), management_data_io::Error> {
+            if register == EXTENDED_REGISTER_DATA_PORT {
+                if self.allowed == 0 {
+                    return Err(management_data_io::Error::Timeout {
+                        physical_layer_device_bus_address,
+                        register,
+                    });
+                }
+                self.allowed -= 1;
+            }
+            self.physical_layer_device
+                .write(physical_layer_device_bus_address, register, value)
+        }
+    }
+
+    #[test]
+    fn a_failed_step_still_restores_the_bus_address_port_and_returns_its_error() {
+        for allowed in 0..6 {
+            let mut physical_layer_device = PhysicalLayerDevice::yt8531_at_1800_millivolts();
+            physical_layer_device.write_raw(EXTENDED_REGISTER_BUS_ADDRESS_PORT, 0x1234);
+            let mut bus = FailingDataWrites {
+                physical_layer_device,
+                allowed,
+            };
+            assert_eq!(
+                configure(&mut bus, 0, &PHYSICAL_LAYER_DEVICE_SETTINGS),
+                Err(management_data_io::Error::Timeout {
+                    physical_layer_device_bus_address: 0,
+                    register: EXTENDED_REGISTER_DATA_PORT,
+                }),
+                "{allowed}"
+            );
+            assert_eq!(
+                bus.physical_layer_device
+                    .raw(EXTENDED_REGISTER_BUS_ADDRESS_PORT),
+                0x1234,
+                "{allowed}"
+            );
+        }
+        let mut physical_layer_device = PhysicalLayerDevice::yt8531_at_1800_millivolts();
+        physical_layer_device.write_raw(EXTENDED_REGISTER_BUS_ADDRESS_PORT, 0x1234);
+        let mut bus = FailingDataWrites {
+            physical_layer_device,
+            allowed: 0,
+        };
+        assert!(
+            apply_speed(
+                &mut bus,
+                0,
+                &PHYSICAL_LAYER_DEVICE_SETTINGS,
+                Speed::Thousand
+            )
+            .is_err()
+        );
+        assert_eq!(
+            bus.physical_layer_device
+                .raw(EXTENDED_REGISTER_BUS_ADDRESS_PORT),
+            0x1234
+        );
     }
 
     #[test]
