@@ -14,6 +14,19 @@ sentence beside it.
 - `cache_coherence::Observation::new` builds an observation from its four parts. A caller that
   packs an account into words can now rebuild it. Before, `#[non_exhaustive]` left no way to
   build one.
+- Breaking: the crate root re-exports only `DataPlane`, its traits, its error and the ring sizes.
+  The descriptor bits, `CRC_BYTES`, the descriptor constructors and `receive_verdict` are private.
+  The descriptor format can now change without a major version.
+- `DataPlane::is_frame_waiting` says whether `receive` has a descriptor to take. A poll loop no
+  longer judges the next descriptor itself.
+- `DataPlane::start` puts its three ring cursors back to slot 0. A data plane started again after
+  a controller reset now follows the device.
+- `configure` and `apply_speed` restore the extended-address port when a step fails, too. They
+  return the step's error.
+- `Applied` gains `receive_clock_drive_defaulted` and `receive_data_drive_defaulted`. A drive
+  current the table lacks still gets the part's default, and the caller can now report it.
+- Named constants with OpenBSD's spellings as aliases replace the last bare bits: flow control,
+  the jumbo bit and the transmit flush limit.
 
 ## BUGS
 
