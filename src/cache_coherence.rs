@@ -106,6 +106,27 @@ pub struct Observation {
     pub payload: Payload,
 }
 
+impl Observation {
+    /// **An observation from its four parts**, for a caller that carries one across a boundary
+    /// the struct cannot cross, such as a report packed into words, and rebuilds it on the far
+    /// side. The struct stays `#[non_exhaustive]`, so a later field arrives with a default here
+    /// rather than breaking every caller that names the fields.
+    #[must_use]
+    pub const fn new(
+        receive_descriptor_word_3: u32,
+        transmit_descriptor_word_3: u32,
+        status: u32,
+        payload: Payload,
+    ) -> Self {
+        Observation {
+            receive_descriptor_word_3,
+            transmit_descriptor_word_3,
+            status,
+            payload,
+        }
+    }
+}
+
 /// **Read the CPU's half of the observation** and pair it with the device's status word.
 pub fn observe(
     region: &impl DirectMemoryAccessRegion,
@@ -449,5 +470,20 @@ mod tests {
             payload: Payload::Poison,
         };
         assert_eq!(classify(&o), Verdict::Inconclusive);
+    }
+
+    /// Each part lands in its own field, none swapped with another of the same type.
+    #[test]
+    fn new_keeps_each_part_where_it_was_given() {
+        let o = Observation::new(1, 2, 3, Payload::Poison);
+        assert_eq!(
+            (
+                o.receive_descriptor_word_3,
+                o.transmit_descriptor_word_3,
+                o.status,
+                o.payload
+            ),
+            (1, 2, 3, Payload::Poison)
+        );
     }
 }
