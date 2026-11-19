@@ -1,8 +1,11 @@
 #![cfg_attr(not(test), no_std)]
-//! **The Synopsys `DesignWare` Ethernet `QoS` controller, as pure logic**: the network ports of the `StarFive` `VisionFive` 2 board.
+//! **The Synopsys `DesignWare` Ethernet `QoS` controller, as pure logic**, with the Motorcomm
+//! `YT8531` physical layer device.
 //!
-//! The board is the `StarFive` `VisionFive` 2. It has two device trees, mainline Linux's and the
-//! vendor's own, which spell the controller differently; [`jh7110`] reads both.
+//! The crate knows no system-on-chip and reads no device tree. The port's register window, its
+//! bus configuration ([`network_interface_controller::BusConfiguration`]) and the physical layer
+//! device's settings ([`motorcomm_physical_layer_device::Settings`]) come from the caller, in
+//! [`bring_up::Inputs`].
 //!
 //! Everything the driver's two halves compute and nothing either touches. A kernel half brings the
 //! controller and its physical layer device up, measures direct memory access (DMA) coherence
@@ -75,14 +78,11 @@
 //!
 //! - Nothing here has touched the device; every test runs against `simulator`. One receive and one
 //!   transmit queue, polled: no interrupt, offloads, jumbo frames or multicast.
-//! - Only `gmac0` (`16030000`) is wired; `gmac1`'s clocks in the SYS (system) domain have no
-//!   plan.
 #[cfg(test)]
 extern crate std;
 
 pub mod bring_up;
 pub mod cache_coherence;
-pub mod jh7110;
 pub mod link;
 /// The README's example, compiled by `cargo test` so it cannot rot.
 #[cfg(doctest)]

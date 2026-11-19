@@ -140,7 +140,8 @@ pub(crate) const fn mac_address_words(station_mac_address: [u8; 6]) -> (u32, u32
 }
 
 /// **How the DMA meets the bus**: the `snps,*` properties of a board's node and its
-/// `snps,axi-config`. [`crate::jh7110::BUS_CONFIGURATION`] is the board's.
+/// `snps,axi-config`. The crate holds no board's; the caller reads it from the board's device
+/// tree, or carries it, and passes it in [`crate::bring_up::Inputs`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BusConfiguration {
     /// `snps,fixed-burst`.
@@ -604,8 +605,7 @@ pub fn stop(hardware: &mut impl Hardware) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jh7110::BUS_CONFIGURATION;
-    use crate::simulator::{Memory, NetworkInterfaceController};
+    use crate::simulator::{BUS_CONFIGURATION, Memory, NetworkInterfaceController};
 
     const PHYSICAL_ADDRESS: u64 = 0x4800_0000;
     const STATION_MAC_ADDRESS: [u8; 6] = [0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c];

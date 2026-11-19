@@ -22,8 +22,8 @@
 /// right only against a simulated controller.
 ///
 /// What may be assumed: the controller's clocks and resets are up, and the board's interface
-/// select is written, before the first call. Those sit in windows the controller does not own;
-/// [`jh7110`](crate::jh7110) says what they are on that board.
+/// select is written, before the first call. Those sit in windows the controller does not own,
+/// and the caller knows where they are on its board.
 pub trait Hardware {
     /// Read the 32-bit register at `offset`, as one volatile 32-bit load.
     fn read(&mut self, offset: u32) -> u32;
