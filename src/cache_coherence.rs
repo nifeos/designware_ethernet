@@ -7,6 +7,11 @@
 //! [`WAIT_MICROSECONDS`], then read the channel status register. [`classify`] compares the two accounts; the
 //! status register is read over memory-mapped input and output (MMIO), which no cache stands in front of, so a non-coherent machine
 //! fails in a way that names the direction.
+//!
+//! The probe needs the physical layer device's receive clock, cable or no cable: MAC loopback turns
+//! the transmit path back inside the MAC, but the MAC is clocked from the physical layer device.
+//! That is why the bring-up keeps the clock running with no cable, and without it the software
+//! reset before the probe does not complete, so the bring-up refuses before the probe runs.
 
 use crate::{
     CRC_BYTES, DataPlane, DirectMemoryAccessRegion, RECEIVE_DESCRIPTOR_WORD_3_OWNED_BY_DEVICE,
@@ -173,7 +178,9 @@ pub enum Verdict {
     /// disagree, so device-to-CPU is not coherent for at least the buffer's lines.
     ReceivedPayloadStale,
     /// A frame arrived whole and it is not the frame the CPU wrote: the device transmitted what
-    /// was in memory rather than what was in the cache.
+    /// was in memory rather than what was in the cache. A delivered descriptor that is not the
+    /// probe's whole frame (an error summary, another length) over a payload that matches gives this
+    /// verdict too, since the device's account of the frame is still not the one the CPU wrote.
     TransmittedPayloadStale,
     /// The DMA reported a fatal bus error: an address the interconnect refused. Not a coherence
     /// answer at all; the region or the bus setup is wrong.
@@ -196,6 +203,8 @@ pub fn classify(observation: &Observation) -> Verdict {
         ) {
             (Payload::Matches, ReceiveVerdict::Frame(PROBE_FRAME_BYTES)) => Verdict::Coherent,
             (Payload::Poison, _) => Verdict::ReceivedPayloadStale,
+            // A matching payload under a descriptor that is not `Frame(PROBE_FRAME_BYTES)` lands
+            // here too: the descriptor disagrees rather than the payload.
             _ => Verdict::TransmittedPayloadStale,
         };
     }
