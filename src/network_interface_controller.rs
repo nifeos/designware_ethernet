@@ -186,12 +186,14 @@ pub(crate) fn receive_queue_mode(current: u32, bus: &BusConfiguration, queue_byt
     if queue_bytes >= 4096 {
         // OpenBSD's flow control thresholds, the deactivate field 3 and the activate field 1.
         mode |= registers::RECEIVE_QUEUE_0_OPERATION_MODE_HARDWARE_FLOW_CONTROL_ENABLE;
-        mode &= !(registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_MASK
-            | registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_MASK);
-        mode |= (0x3
-            << registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_SHIFT)
-            | (0x1
-                << registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_SHIFT);
+        // One field per statement: a `|` joining two fields that share no bit is its own `^`, a
+        // mutant no test can tell apart.
+        mode &= !registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_MASK;
+        mode &= !registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_MASK;
+        mode |= 0x3
+            << registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_SHIFT;
+        mode |=
+            0x1 << registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_SHIFT;
     }
     mode
 }
