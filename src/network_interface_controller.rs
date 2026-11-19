@@ -184,10 +184,16 @@ pub(crate) fn receive_queue_mode(current: u32, bus: &BusConfiguration, queue_byt
     mode |= (receive_queue_size << registers::RECEIVE_QUEUE_0_OPERATION_MODE_QUEUE_SIZE_SHIFT)
         & registers::RECEIVE_QUEUE_0_OPERATION_MODE_QUEUE_SIZE_BLOCKS_MASK;
     if queue_bytes >= 4096 {
-        // EHFC, then RFD = 3 and RFA = 1: OpenBSD's flow control thresholds.
-        mode |= 1 << 7;
-        mode &= !((0x3f << 14) | (0x3f << 8));
-        mode |= (0x3 << 14) | (0x1 << 8);
+        // OpenBSD's flow control thresholds, the deactivate field 3 and the activate field 1.
+        mode |= registers::RECEIVE_QUEUE_0_OPERATION_MODE_HARDWARE_FLOW_CONTROL_ENABLE;
+        // One field per statement: a `|` joining two fields that share no bit is its own `^`, a
+        // mutant no test can tell apart.
+        mode &= !registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_MASK;
+        mode &= !registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_MASK;
+        mode |= 0x3
+            << registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_SHIFT;
+        mode |=
+            0x1 << registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_SHIFT;
     }
     mode
 }
@@ -203,7 +209,9 @@ pub(crate) const RECEIVE_QUEUE_MODE_FIELDS_DO_NOT_OVERLAP: () = assert!(
     registers::RECEIVE_QUEUE_0_OPERATION_MODE_STORE_AND_FORWARD
         & registers::RECEIVE_QUEUE_0_OPERATION_MODE_THRESHOLD_CONTROL_MASK
         == 0
-        && (0x3f << 14) & (0x3f << 8) == 0
+        && registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_MASK
+            & registers::RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_MASK
+            == 0
 );
 
 /// The transmit operation mode word for a queue of `queue_bytes` bytes, OpenBSD's arithmetic.
@@ -478,7 +486,7 @@ pub(crate) const CONFIGURED_BUS_FIELDS_DO_NOT_OVERLAP: () = assert!(
 /// probe.
 ///
 /// OpenBSD also sets `JE` (jumbo frames). This does not: a jumbo frame cannot fit a 2048-byte
-/// buffer, would span descriptors, and would be dropped by [`crate::receive_verdict`] anyway, so
+/// buffer, would span descriptors, and would be dropped by the data plane's receive anyway, so
 /// accepting it into the queue memory only spends ring slots on frames that are thrown away.
 pub const fn mac_configuration(current: u32, link: Link, loopback: bool) -> u32 {
     let mut configuration = current
@@ -555,6 +563,10 @@ pub fn start(hardware: &mut impl Hardware, link: Link, loopback: bool) {
     );
 }
 
+/// How long [`stop`] waits for the transmit queue's flush to finish, polled once a microsecond:
+/// OpenBSD's 10000 tries of `dwqe_down`.
+const TRANSMIT_FLUSH_LIMIT_MICROSECONDS: u32 = 10_000;
+
 /// **Stop the MAC and both DMA channels**, OpenBSD's `dwqe_down` order: receiver off, receive DMA
 /// off, transmit DMA off, flush the transmit queue, transmitter off.
 pub fn stop(hardware: &mut impl Hardware) -> Result<(), Error> {
@@ -579,7 +591,7 @@ pub fn stop(hardware: &mut impl Hardware) -> Result<(), Error> {
         queue_operation_mode | registers::TRANSMIT_QUEUE_0_OPERATION_MODE_FLUSH,
     );
     let mut flushed = false;
-    for _ in 0..10_000 {
+    for _ in 0..TRANSMIT_FLUSH_LIMIT_MICROSECONDS {
         if hardware.read(registers::TRANSMIT_QUEUE_0_OPERATION_MODE_REGISTER)
             & registers::TRANSMIT_QUEUE_0_OPERATION_MODE_FLUSH
             == 0
@@ -812,7 +824,11 @@ mod tests {
             0,
             "loopback cleared"
         );
-        assert_eq!(c & (1 << 16), 0, "JE");
+        assert_eq!(
+            c & registers::MAC_CONFIGURATION_JUMBO_PACKET_ENABLE,
+            0,
+            "JE"
+        );
         let c = mac_configuration(
             0,
             Link {

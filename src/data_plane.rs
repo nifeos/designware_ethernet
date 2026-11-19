@@ -138,8 +138,13 @@ impl DataPlane {
     /// **Post every receive descriptor but the last and clear the transmit ring.** The kernel
     /// half programmed both ring bases and lengths and started the DMA with both tails at the ring
     /// bases (nothing available); the receive tail write here is what hands the device its
-    /// buffers.
+    /// buffers. The three ring cursors go back to slot 0 with the rings, so a second call starts
+    /// the same rings over rather than leaving the cursors where the last run stopped; `dropped`
+    /// keeps counting.
     pub fn start(&mut self, region: &mut impl DirectMemoryAccessRegion, tails: &mut impl Tails) {
+        self.receive_next = 0;
+        self.transmit_next = 0;
+        self.transmit_clean = 0;
         for index in 0..RECEIVE_ENTRIES {
             let descriptor = layout::receive_descriptor(index);
             let [words_0_and_1, words_2_and_3] = if index == RECEIVE_ENTRIES - 1 {
@@ -160,10 +165,15 @@ impl DataPlane {
     }
 
     /// Take the next received frame into `out`, returning its length, or `None` when the device has
-    /// written nothing new. A descriptor judged [`ReceiveVerdict::Drop`] is consumed and counted
-    /// and the next tried, so one bad frame cannot stall the ring. One call looks at no more than
+    /// written nothing new. A descriptor that holds no frame to deliver (an error, a context
+    /// descriptor, a frame spanning descriptors, a length it could not have meant) is consumed and
+    /// counted in `dropped` and the next tried, so one bad frame cannot stall the ring. One call looks at no more than
     /// [`RECEIVE_ENTRIES`] descriptors, so a device that keeps refilling the ring with error frames
     /// makes it return `None` and the caller polls again.
+    ///
+    /// `out` is judged as the room for the frame: a frame longer than `out.len()` is dropped like a
+    /// bad one, consumed, counted and gone, so offer [`MAXIMUM_FRAME_BYTES`] unless losing longer
+    /// frames is wanted.
     pub fn receive(
         &mut self,
         region: &mut impl DirectMemoryAccessRegion,
@@ -207,6 +217,15 @@ impl DataPlane {
             }
         }
         None
+    }
+
+    /// **Is a frame, or a descriptor to drop, waiting for [`DataPlane::receive`]?** It reads the
+    /// next descriptor's word 3 and takes nothing, so a poll loop can skip a sleep. `true` means the
+    /// device has written that descriptor back; the frame it holds may still be dropped.
+    pub fn is_frame_waiting(&self, region: &impl DirectMemoryAccessRegion) -> bool {
+        let descriptor = layout::receive_descriptor(self.receive_next);
+        let descriptor_word_3 = (region.read_u64(descriptor + 8) >> 32) as u32;
+        receive_verdict(descriptor_word_3, MAXIMUM_FRAME_BYTES) != ReceiveVerdict::NotYet
     }
 
     /// Queue `frame` for transmission.

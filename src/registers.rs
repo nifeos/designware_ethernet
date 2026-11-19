@@ -58,6 +58,13 @@ pub(crate) const MAC_CONFIGURATION_FAST_ETHERNET_SPEED: u32 = 1 << 14;
 #[doc(alias = "GMAC_MAC_CONF_PS")]
 #[doc(alias = "MAC_CONF_PS")]
 pub(crate) const MAC_CONFIGURATION_PORT_SELECT: u32 = 1 << 15;
+/// **Jumbo packet enable** (`GMAC_MAC_CONF_JE`, `dwqereg.h`). OpenBSD sets it; this driver never
+/// does, since a jumbo frame cannot fit a receive buffer, and only the tests read it, to check
+/// that `mac_configuration` leaves it clear.
+#[cfg(test)]
+#[doc(alias = "jumbo packet enable")]
+#[doc(alias = "GMAC_MAC_CONF_JE")]
+pub(crate) const MAC_CONFIGURATION_JUMBO_PACKET_ENABLE: u32 = 1 << 16;
 /// **Jabber disable** (`GMAC_MAC_CONF_JD`, `dwqereg.h`).
 #[doc(alias = "GMAC_MAC_CONF_JD")]
 #[doc(alias = "MAC_CONF_JD")]
@@ -205,6 +212,33 @@ pub(crate) const RECEIVE_QUEUE_0_OPERATION_MODE_THRESHOLD_CONTROL_128_BYTES: u32
 #[doc(alias = "receive store and forward")]
 #[doc(alias = "GMAC_MTL_CHAN_RX_OP_MODE_RSF")]
 pub(crate) const RECEIVE_QUEUE_0_OPERATION_MODE_STORE_AND_FORWARD: u32 = 1 << 5;
+/// **Enable hardware flow control** (`GMAC_MTL_CHAN_RX_OP_MODE_EHFC`, `dwqereg.h`): the queue
+/// sends pause frames by the two thresholds below.
+#[doc(alias = "enable hardware flow control")]
+#[doc(alias = "GMAC_MTL_CHAN_RX_OP_MODE_EHFC")]
+pub(crate) const RECEIVE_QUEUE_0_OPERATION_MODE_HARDWARE_FLOW_CONTROL_ENABLE: u32 = 1 << 7;
+/// **Threshold for deactivating flow control field** (`GMAC_MTL_CHAN_RX_OP_MODE_RFD_MASK`,
+/// `dwqereg.h`), an encoded fill level of the receive queue.
+#[doc(alias = "threshold for deactivating flow control field")]
+#[doc(alias = "GMAC_MTL_CHAN_RX_OP_MODE_RFD_MASK")]
+pub(crate) const RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_MASK: u32 =
+    0x3f << 14;
+/// **Threshold for deactivating flow control shift** (`GMAC_MTL_CHAN_RX_OP_MODE_RFD_SHIFT`,
+/// `dwqereg.h`).
+#[doc(alias = "threshold for deactivating flow control shift")]
+#[doc(alias = "GMAC_MTL_CHAN_RX_OP_MODE_RFD_SHIFT")]
+pub(crate) const RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_SHIFT: u32 = 14;
+/// **Threshold for activating flow control field** (`GMAC_MTL_CHAN_RX_OP_MODE_RFA_MASK`,
+/// `dwqereg.h`), an encoded fill level of the receive queue.
+#[doc(alias = "threshold for activating flow control field")]
+#[doc(alias = "GMAC_MTL_CHAN_RX_OP_MODE_RFA_MASK")]
+pub(crate) const RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_MASK: u32 =
+    0x3f << 8;
+/// **Threshold for activating flow control shift** (`GMAC_MTL_CHAN_RX_OP_MODE_RFA_SHIFT`,
+/// `dwqereg.h`).
+#[doc(alias = "threshold for activating flow control shift")]
+#[doc(alias = "GMAC_MTL_CHAN_RX_OP_MODE_RFA_SHIFT")]
+pub(crate) const RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_SHIFT: u32 = 8;
 /// **Receive queue size field** (`GMAC_MTL_CHAN_RX_OP_MODE_RQS_MASK`, `dwqereg.h`).
 #[doc(alias = "receive queue size field")]
 #[doc(alias = "GMAC_MTL_CHAN_RX_OP_MODE_RQS_MASK")]
@@ -490,10 +524,13 @@ mod tests {
                 MAC_CONFIGURATION_FULL_DUPLEX,
                 MAC_CONFIGURATION_FAST_ETHERNET_SPEED,
                 MAC_CONFIGURATION_PORT_SELECT,
+                MAC_CONFIGURATION_JUMBO_PACKET_ENABLE,
                 MAC_CONFIGURATION_JABBER_DISABLE,
                 MAC_CONFIGURATION_PACKET_BURST_ENABLE,
             ],
-            [0x200, 0x1000, 0x2000, 0x4000, 0x8000, 0x2_0000, 0x4_0000]
+            [
+                0x200, 0x1000, 0x2000, 0x4000, 0x8000, 0x1_0000, 0x2_0000, 0x4_0000
+            ]
         );
         assert_eq!(
             [
@@ -511,9 +548,12 @@ mod tests {
                 RECEIVE_QUEUE_0_OPERATION_MODE_THRESHOLD_CONTROL_MASK,
                 RECEIVE_QUEUE_0_OPERATION_MODE_THRESHOLD_CONTROL_128_BYTES,
                 RECEIVE_QUEUE_0_OPERATION_MODE_STORE_AND_FORWARD,
+                RECEIVE_QUEUE_0_OPERATION_MODE_HARDWARE_FLOW_CONTROL_ENABLE,
+                RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_DEACTIVATE_THRESHOLD_MASK,
+                RECEIVE_QUEUE_0_OPERATION_MODE_FLOW_CONTROL_ACTIVATE_THRESHOLD_MASK,
                 RECEIVE_QUEUE_0_OPERATION_MODE_QUEUE_SIZE_BLOCKS_MASK,
             ],
-            [0x18, 0x18, 0x20, 0x3ff0_0000]
+            [0x18, 0x18, 0x20, 0x80, 0xf_c000, 0x3f00, 0x3ff0_0000]
         );
         assert_eq!(
             [

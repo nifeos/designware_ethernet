@@ -395,3 +395,100 @@ fn the_largest_frame_is_sent_and_a_full_ring_says_so_in_advance() {
         MAXIMUM_FRAME_BYTES
     );
 }
+
+/// A data plane started a second time, after the controller was stopped, reset and programmed
+/// again, picks up at slot 0 with the device and not where the first run's cursors stopped.
+#[test]
+fn a_second_start_after_a_reset_receives_and_transmits_from_slot_0() {
+    let mut network_interface_controller =
+        NetworkInterfaceController::new(PHYSICAL_ADDRESS, Memory::coherent(PHYSICAL_ADDRESS));
+    network_interface_controller.program_rings_and_start(PHYSICAL_ADDRESS);
+    let mut data_plane = DataPlane::new(PHYSICAL_ADDRESS);
+    network_interface_controller.with(|r, t| data_plane.start(r, t));
+    let mut out = vec![0u8; MAXIMUM_FRAME_BYTES];
+    for k in 0..3u8 {
+        assert!(network_interface_controller.wire_in(&frame(64, k)));
+        network_interface_controller
+            .with(|r, t| data_plane.receive(r, t, &mut out))
+            .unwrap();
+        network_interface_controller
+            .with(|r, t| data_plane.transmit(r, t, &frame(60, k)))
+            .unwrap();
+    }
+    assert_ne!(data_plane.receive_cursor(), 0);
+    network_interface_controller::stop(&mut network_interface_controller).unwrap();
+    network_interface_controller::soft_reset(&mut network_interface_controller).unwrap();
+    network_interface_controller.program_rings_and_start(PHYSICAL_ADDRESS);
+    network_interface_controller.with(|r, t| data_plane.start(r, t));
+    assert_eq!(data_plane.receive_cursor(), 0);
+    let good = frame(70, 0x40);
+    assert!(network_interface_controller.wire_in(&good));
+    let n = network_interface_controller
+        .with(|r, t| data_plane.receive(r, t, &mut out))
+        .unwrap();
+    assert_eq!(&out[..n], &good[..]);
+    let sent_before = network_interface_controller.wire_out().len();
+    network_interface_controller
+        .with(|r, t| data_plane.transmit(r, t, &frame(61, 0x50)))
+        .unwrap();
+    network_interface_controller.step();
+    let sent = network_interface_controller.wire_out();
+    assert_eq!(sent.len(), sent_before + 1);
+    assert_eq!(sent[sent_before], frame(61, 0x50));
+}
+
+/// `is_frame_waiting` says what the next `receive` will find without taking it: nothing after
+/// start, then a frame, then nothing once the frame is taken; an error frame counts as waiting.
+#[test]
+fn is_frame_waiting_reads_the_next_descriptor_and_takes_nothing() {
+    let mut network_interface_controller =
+        NetworkInterfaceController::new(PHYSICAL_ADDRESS, Memory::coherent(PHYSICAL_ADDRESS));
+    network_interface_controller.program_rings_and_start(PHYSICAL_ADDRESS);
+    let mut data_plane = DataPlane::new(PHYSICAL_ADDRESS);
+    network_interface_controller.with(|r, t| data_plane.start(r, t));
+    let mut out = vec![0u8; MAXIMUM_FRAME_BYTES];
+    assert!(!network_interface_controller.with(|r, _| data_plane.is_frame_waiting(r)));
+    let good = frame(64, 7);
+    assert!(network_interface_controller.wire_in(&good));
+    assert!(network_interface_controller.with(|r, _| data_plane.is_frame_waiting(r)));
+    assert!(network_interface_controller.with(|r, _| data_plane.is_frame_waiting(r)));
+    let n = network_interface_controller
+        .with(|r, t| data_plane.receive(r, t, &mut out))
+        .unwrap();
+    assert_eq!(&out[..n], &good[..]);
+    assert!(!network_interface_controller.with(|r, _| data_plane.is_frame_waiting(r)));
+    assert!(network_interface_controller.wire_in_with_error(&frame(64, 8)));
+    assert!(network_interface_controller.with(|r, _| data_plane.is_frame_waiting(r)));
+}
+
+/// A frame longer than the room the caller offers is dropped and counted, as `receive` says.
+#[test]
+fn a_frame_longer_than_the_offered_room_is_dropped_and_counted() {
+    let mut network_interface_controller =
+        NetworkInterfaceController::new(PHYSICAL_ADDRESS, Memory::coherent(PHYSICAL_ADDRESS));
+    network_interface_controller.program_rings_and_start(PHYSICAL_ADDRESS);
+    let mut data_plane = DataPlane::new(PHYSICAL_ADDRESS);
+    network_interface_controller.with(|r, t| data_plane.start(r, t));
+    let mut short = vec![0u8; 64];
+    assert!(network_interface_controller.wire_in(&frame(100, 1)));
+    assert_eq!(
+        network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut short)),
+        None
+    );
+    assert_eq!(data_plane.dropped, 1);
+}
+
+/// The three answers `receive_verdict` gives: a frame with the CRC stripped, a descriptor the
+/// device still owns, and a length it could not have meant.
+#[test]
+fn receive_verdict_strips_the_crc_waits_for_the_device_and_drops_a_length_it_could_not_mean() {
+    let whole =
+        RECEIVE_DESCRIPTOR_WORD_3_FIRST_DESCRIPTOR | RECEIVE_DESCRIPTOR_WORD_3_LAST_DESCRIPTOR;
+    // 64 bytes on the wire is 60 of frame and 4 of CRC, which the driver strips.
+    assert_eq!(receive_verdict(whole | 64, 1514), ReceiveVerdict::Frame(60));
+    assert_eq!(
+        receive_verdict(RECEIVE_DESCRIPTOR_WORD_3_OWNED_BY_DEVICE | whole | 64, 1514),
+        ReceiveVerdict::NotYet
+    );
+    assert_eq!(receive_verdict(whole | 0x7fff, 1514), ReceiveVerdict::Drop);
+}
