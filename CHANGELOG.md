@@ -11,6 +11,8 @@ sentence beside it.
   so is `Settings::FALLBACK_GMAC0`. The crate now knows no system-on-chip. `bring_up::Inputs`
   gains `bus_configuration`, which `bring_up` and its coherence probe program, and
   `Settings::from_mainline` is public so a caller can decode the mainline device-tree spelling.
+- `cache_coherence::Observation::new` builds an observation from its four parts. A caller that
+  packs an account into words can now rebuild it. Before, `#[non_exhaustive]` left no way to build one.
 
 ## BUGS
 
