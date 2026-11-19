@@ -6,6 +6,7 @@
 
 /// A link speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Speed {
     /// 10 Mbit/s.
     Ten,

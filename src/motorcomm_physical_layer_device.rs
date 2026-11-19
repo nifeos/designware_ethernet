@@ -227,6 +227,7 @@ pub(crate) const PARTNER_HUNDRED_MEGABIT_ABILITIES_DO_NOT_OVERLAP: () = assert!(
 
 /// A pad drive strength, as a tree states it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PadDriveStrength {
     /// The register code itself, 0 to 7 (the vendor tree's `rgmii_sw_dr*`).
     Code(u8),
@@ -237,6 +238,7 @@ pub enum PadDriveStrength {
 
 /// Where a [`Settings`] came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SettingsSource {
     /// The vendor U-Boot's register-value properties.
     VendorTree,
@@ -476,6 +478,7 @@ fn modify_extended(
 
 /// What [`configure`] found and wrote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Applied {
     /// The I/O voltage the physical layer device is strapped to.
     pub voltage_millivolts: u32,

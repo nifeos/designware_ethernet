@@ -3,25 +3,76 @@
 
 use super::*;
 
-/// The DMA region, as the data plane reads and writes it. Offsets are bytes from the region's
-/// base; an implementation bounds them. `e1000e::DirectMemoryAccessRegion`'s shape.
+/// **The DMA region, as the data plane reads and writes it.** A network-stack half implements it
+/// over its mapping of the region, a kernel half over the same region during the bring-up's
+/// coherence probe; the host tests implement it over a simulated memory. `e1000e`'s
+/// `DirectMemoryAccessRegion`, with the same shape and the same contract.
+///
+/// What the crate guarantees: offsets are bytes from the region's base. Every access lies inside
+/// [`layout::DIRECT_MEMORY_ACCESS_REGION_BYTES`]: the Kani harnesses prove each descriptor and
+/// buffer offset inside its part of the region and each delivered frame inside its buffer. Every [`DirectMemoryAccessRegion::read_u64`] and
+/// [`DirectMemoryAccessRegion::write_u64`] offset is a multiple of 8. An implementation may still
+/// bound them (a mapped window, for example, that panics on an out-of-window offset rather than
+/// touching memory it was not given).
+///
+/// What an implementation guarantees: the device writes this memory behind the compiler's back,
+/// and reads what the driver writes without the compiler seeing a reader. So every method is a
+/// volatile access (`core::ptr::read_volatile` and `write_volatile`, or a copy built from them): a
+/// read is never served from an earlier one, and a write is never dropped or merged. `&self` on the
+/// reads is a borrow of the mapping, not a promise that the memory does not change. An
+/// implementation over a plain slice, as the README's example is, satisfies the signatures and is
+/// right only against a simulated device. Ordering against the device is [`Tails::barrier`]'s.
+///
+/// What may be assumed: the region is physically contiguous at the address
+/// [`DataPlane::new`] was given, and device DMA is coherent with the CPU's caches, so an
+/// implementation does no cache maintenance. The bring-up measures the second rather than assume
+/// it: [`cache_coherence`](crate::cache_coherence) runs once per bring-up, and a machine whose
+/// device DMA is not coherent is refused
+/// ([`bring_up::Error::NotCoherent`](crate::bring_up::Error::NotCoherent)) before any frame
+/// moves.
 pub trait DirectMemoryAccessRegion {
-    /// Read the little-endian `u64` at `offset`.
+    /// Read the little-endian `u64` at `offset`, as one volatile 64-bit load.
     fn read_u64(&self, offset: u64) -> u64;
-    /// Write `value` at `offset`, little-endian.
+    /// Write `value` at `offset`, little-endian, as one volatile 64-bit store.
     fn write_u64(&mut self, offset: u64, value: u64);
-    /// Copy `out.len()` bytes starting at `offset` into `out`.
+    /// Copy `out.len()` bytes starting at `offset` into `out`, by volatile loads.
     fn read_bytes(&self, offset: u64, out: &mut [u8]);
-    /// Copy `source` to `offset`.
+    /// Copy `source` to `offset`, by volatile stores.
     fn write_bytes(&mut self, offset: u64, source: &[u8]);
 }
 
-/// The two tail pointers, and the ordering between them and the region: the only register writes
-/// the data plane makes.
+/// **The two tail pointer registers, and the ordering between them and the region**: the only
+/// register writes the data plane makes. Whoever holds the controller's DMA register page
+/// ([`registers::DIRECT_MEMORY_ACCESS_REGISTER_PAGE_OFFSET_BYTES`]) implements it: a network-stack
+/// half over its mapping of that one page, a kernel half over its mapping of the window during the
+/// bring-up; the host tests implement it over the simulator's registers.
+///
+/// What an implementation guarantees: each tail write is one volatile 32-bit store to channel 0's
+/// register, [`registers::CHANNEL_RECEIVE_DESCRIPTOR_TAIL_POINTER_REGISTER`] or
+/// [`registers::CHANNEL_TRANSMIT_DESCRIPTOR_TAIL_POINTER_REGISTER`]. A tail write is what tells a
+/// suspended DMA channel that descriptors are waiting, so none may be dropped, merged or held back
+/// to a later store.
+///
+/// What the crate guarantees: a value is the low 32 bits of the physical address one past the last
+/// descriptor the device may use. Configuring the controller refuses a region straddling a 4 GiB
+/// boundary
+/// ([`network_interface_controller::Error::RegionOutOfReach`](crate::network_interface_controller::Error::RegionOutOfReach)),
+/// so the high bits the controller holds from the ring's base are the same for every value.
+///
+/// [`Tails::barrier`] orders the region against the device on every architecture the crate builds
+/// for: on `x86_64` a compiler fence (`core::sync::atomic::compiler_fence`) is enough, since the
+/// processor keeps stores in order and loads in order; on `aarch64` it is `dmb osh` (Linux's
+/// `dma_wmb` and `dma_rmb` are its store and load halves, `dmb oshst` and `dmb oshld`); on
+/// `riscv64`, the JH7110's architecture, it is `fence iorw, iorw` (Linux orders a store before a
+/// register write with `fence w, o` and two loads with `fence r, r`).
 pub trait Tails {
-    /// Write the receive tail pointer's low 32 bits ([`registers::CHANNEL_RECEIVE_DESCRIPTOR_TAIL_POINTER_REGISTER`]).
+    /// Write the receive tail pointer's low 32 bits
+    /// ([`registers::CHANNEL_RECEIVE_DESCRIPTOR_TAIL_POINTER_REGISTER`]), as one volatile 32-bit
+    /// store.
     fn set_receive_tail(&mut self, tail_pointer_low_bits: u32);
-    /// Write the transmit tail pointer's low 32 bits ([`registers::CHANNEL_TRANSMIT_DESCRIPTOR_TAIL_POINTER_REGISTER`]).
+    /// Write the transmit tail pointer's low 32 bits
+    /// ([`registers::CHANNEL_TRANSMIT_DESCRIPTOR_TAIL_POINTER_REGISTER`]), as one volatile 32-bit
+    /// store.
     fn set_transmit_tail(&mut self, tail_pointer_low_bits: u32);
     /// Order every region access before this against every access after it, as seen by the
     /// device. Called between filling a descriptor and the tail write that announces it, and
@@ -31,6 +82,7 @@ pub trait Tails {
 
 /// Why a frame was not queued.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TransmitError {
     /// Empty, or longer than [`MAXIMUM_FRAME_BYTES`].
     BadLength,

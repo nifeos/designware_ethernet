@@ -180,6 +180,7 @@ pub(crate) const TRANSMIT_DESCRIPTOR_BITS_DO_NOT_OVERLAP: () = assert!(
 
 /// What a receive descriptor's word 3 says, judged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReceiveVerdict {
     /// The device still owns it.
     NotYet,
