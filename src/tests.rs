@@ -123,6 +123,96 @@ fn a_ring_full_of_error_frames_is_consumed_in_one_call_and_the_next_good_frame_a
     assert_eq!(&out[..n], &good[..]);
 }
 
+/// A region whose device writes an error frame back into every receive descriptor the moment the
+/// driver reposts it, the storm `receive`'s budget exists for. It gives out at most
+/// `write_backs_left` error frames, so a `receive` without a budget ends too, with a count the
+/// test refuses, rather than hanging.
+struct ErrorFrameStorm {
+    bytes: Vec<u8>,
+    write_backs_left: usize,
+}
+
+impl ErrorFrameStorm {
+    const ERROR_FRAME_WORD_3: u32 = RECEIVE_DESCRIPTOR_WORD_3_FIRST_DESCRIPTOR
+        | RECEIVE_DESCRIPTOR_WORD_3_LAST_DESCRIPTOR
+        | RECEIVE_DESCRIPTOR_WORD_3_ERROR_SUMMARY
+        | 64;
+
+    fn new(write_backs: usize) -> ErrorFrameStorm {
+        let mut storm = ErrorFrameStorm {
+            bytes: vec![0; layout::DIRECT_MEMORY_ACCESS_REGION_BYTES as usize],
+            write_backs_left: write_backs,
+        };
+        for index in 0..RECEIVE_ENTRIES {
+            storm.write_back_error_frame(layout::receive_descriptor(index) + 8);
+        }
+        storm
+    }
+
+    fn is_receive_word_2_and_3(offset: u64) -> bool {
+        offset < u64::from(RECEIVE_ENTRIES) * DESCRIPTOR_BYTES && offset % DESCRIPTOR_BYTES == 8
+    }
+
+    fn write_back_error_frame(&mut self, offset: u64) -> bool {
+        if self.write_backs_left == 0 {
+            return false;
+        }
+        self.write_backs_left -= 1;
+        let words_2_and_3 = u64::from(Self::ERROR_FRAME_WORD_3) << 32;
+        self.bytes[offset as usize..offset as usize + 8]
+            .copy_from_slice(&words_2_and_3.to_le_bytes());
+        true
+    }
+}
+
+impl DirectMemoryAccessRegion for ErrorFrameStorm {
+    fn read_u64(&self, offset: u64) -> u64 {
+        let at = offset as usize;
+        u64::from_le_bytes(self.bytes[at..at + 8].try_into().unwrap())
+    }
+
+    fn write_u64(&mut self, offset: u64, value: u64) {
+        if Self::is_receive_word_2_and_3(offset) && self.write_back_error_frame(offset) {
+            return;
+        }
+        let at = offset as usize;
+        self.bytes[at..at + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn read_bytes(&self, offset: u64, out: &mut [u8]) {
+        let at = offset as usize;
+        out.copy_from_slice(&self.bytes[at..at + out.len()]);
+    }
+
+    fn write_bytes(&mut self, offset: u64, source: &[u8]) {
+        let at = offset as usize;
+        self.bytes[at..at + source.len()].copy_from_slice(source);
+    }
+}
+
+struct NoTails;
+
+impl Tails for NoTails {
+    fn set_receive_tail(&mut self, _tail_pointer_low_bits: u32) {}
+    fn set_transmit_tail(&mut self, _tail_pointer_low_bits: u32) {}
+    fn barrier(&mut self) {}
+}
+
+/// A device that refills the ring with error frames as fast as `receive` reposts it makes one call
+/// return `None` after consuming exactly `RECEIVE_ENTRIES` descriptors, so the caller gets control
+/// back; the next call takes the next budget.
+#[test]
+fn an_error_frame_storm_ends_one_receive_call_at_its_budget() {
+    let entries = usize::from(RECEIVE_ENTRIES);
+    let mut storm = ErrorFrameStorm::new(4 * entries);
+    let mut data_plane = DataPlane::new(PHYSICAL_ADDRESS);
+    let mut out = vec![0u8; MAXIMUM_FRAME_BYTES];
+    assert_eq!(data_plane.receive(&mut storm, &mut NoTails, &mut out), None);
+    assert_eq!(data_plane.dropped, u32::from(RECEIVE_ENTRIES));
+    assert_eq!(data_plane.receive(&mut storm, &mut NoTails, &mut out), None);
+    assert_eq!(data_plane.dropped, 2 * u32::from(RECEIVE_ENTRIES));
+}
+
 #[test]
 fn transmitted_frames_leave_in_order_and_the_ring_is_reclaimed() {
     let mut network_interface_controller =
