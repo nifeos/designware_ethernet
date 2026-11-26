@@ -15,6 +15,10 @@ pub(crate) const TRANSMIT_BUFFERS: u64 = RECEIVE_BUFFERS + RECEIVE_ENTRIES as u6
 /// The size in bytes of the `DirectMemoryAccessRegion` the controller reads and writes.
 pub const DIRECT_MEMORY_ACCESS_REGION_BYTES: u64 =
     TRANSMIT_BUFFERS + TRANSMIT_ENTRIES as u64 * BUFFER_BYTES;
+// The two sums pinned to their values: two pages of rings, then sixteen 2 KiB buffers each way.
+// A region of another size is a change to the layout, made here on purpose.
+const _: () = assert!(TRANSMIT_BUFFERS == 0xa000);
+const _: () = assert!(DIRECT_MEMORY_ACCESS_REGION_BYTES == 0x12000);
 /// The size in pages of the `DirectMemoryAccessRegion`.
 pub const DIRECT_MEMORY_ACCESS_REGION_PAGES: u64 = DIRECT_MEMORY_ACCESS_REGION_BYTES.div_ceil(PAGE);
 
