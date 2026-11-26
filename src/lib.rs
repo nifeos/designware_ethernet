@@ -114,6 +114,7 @@ pub use descriptor::{
     BUFFER_BYTES, DESCRIPTOR_BYTES, MAXIMUM_FRAME_BYTES, RECEIVE_ENTRIES, TRANSMIT_ENTRIES,
 };
 pub use hardware::Hardware;
+pub use network_interface_controller::StationMacAddress;
 
 #[cfg(kani)]
 mod proofs;

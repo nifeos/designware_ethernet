@@ -112,22 +112,53 @@ pub fn soft_reset(hardware: &mut impl Hardware) -> Result<u64, Error> {
     }
 }
 
+/// **An address a station can own**: six octets in transmission order that are not all zero, not
+/// all ones (the address registers' reset value) and not multicast (the low bit of the first octet
+/// clear). The only way to make one is [`StationMacAddress::new`], so every address the driver
+/// programs has passed that check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[doc(alias = "mac_address")]
+pub struct StationMacAddress([u8; 6]);
+
+impl StationMacAddress {
+    /// `octets` as a station address, or `None` when they are all zero, all ones, or multicast.
+    pub const fn new(octets: [u8; 6]) -> Option<StationMacAddress> {
+        let all_zero = u64::from_le_bytes([
+            octets[0], octets[1], octets[2], octets[3], octets[4], octets[5], 0, 0,
+        ]) == 0;
+        let all_ones = u64::from_le_bytes([
+            octets[0], octets[1], octets[2], octets[3], octets[4], octets[5], 0xff, 0xff,
+        ]) == u64::MAX;
+        if all_zero || all_ones || octets[0] & 1 != 0 {
+            return None;
+        }
+        Some(StationMacAddress(octets))
+    }
+
+    /// The six octets, in transmission order.
+    pub const fn octets(self) -> [u8; 6] {
+        self.0
+    }
+}
+
+impl From<StationMacAddress> for [u8; 6] {
+    fn from(address: StationMacAddress) -> [u8; 6] {
+        address.0
+    }
+}
+
 /// **The station address in the two address registers**, OpenBSD's `dwqe_lladdr_read` byte order,
-/// or `None` when they hold nothing a station could own: all zero or all ones (the reset value),
-/// or a multicast address.
-pub fn station_mac_address(high: u32, low: u32) -> Option<[u8; 6]> {
+/// or `None` when they hold nothing [`StationMacAddress::new`] accepts.
+pub fn station_mac_address(high: u32, low: u32) -> Option<StationMacAddress> {
     let [byte_0, byte_1, byte_2, byte_3] = low.to_le_bytes();
     let [byte_4, byte_5, _, _] = high.to_le_bytes();
-    let station_mac_address = [byte_0, byte_1, byte_2, byte_3, byte_4, byte_5];
-    if station_mac_address == [0; 6] || station_mac_address == [0xff; 6] || byte_0 & 1 != 0 {
-        return None;
-    }
-    Some(station_mac_address)
+    StationMacAddress::new([byte_0, byte_1, byte_2, byte_3, byte_4, byte_5])
 }
 
 /// The two address register words for `station_mac_address`: `(high, low)`, OpenBSD's
 /// `dwqe_lladdr_write`.
-pub(crate) const fn mac_address_words(station_mac_address: [u8; 6]) -> (u32, u32) {
+pub(crate) const fn mac_address_words(station_mac_address: StationMacAddress) -> (u32, u32) {
+    let station_mac_address = station_mac_address.octets();
     (
         u32::from_le_bytes([station_mac_address[4], station_mac_address[5], 0, 0]),
         u32::from_le_bytes([
@@ -397,7 +428,7 @@ pub fn configure(
     id: &Identity,
     bus: &BusConfiguration,
     region_physical_address: u64,
-    station_mac_address: [u8; 6],
+    station_mac_address: StationMacAddress,
 ) -> Result<(), Error> {
     if !is_region_in_reach(
         region_physical_address,
@@ -651,7 +682,8 @@ mod tests {
     use crate::simulator::{BUS_CONFIGURATION, Memory, NetworkInterfaceController};
 
     const PHYSICAL_ADDRESS: u64 = 0x4800_0000;
-    const STATION_MAC_ADDRESS: [u8; 6] = [0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c];
+    const STATION_MAC_ADDRESS: StationMacAddress =
+        StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).unwrap();
 
     #[test]
     fn a_reset_that_completes_reports_how_long_it_took() {
@@ -689,6 +721,24 @@ mod tests {
         assert_eq!(station_mac_address(0xffff_ffff, 0xffff_ffff), None);
         assert_eq!(station_mac_address(0, 0), None);
         assert_eq!(station_mac_address(0, 1), None, "multicast");
+        assert_eq!(
+            StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).map(<[u8; 6]>::from),
+            Some([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c])
+        );
+        assert_eq!(StationMacAddress::new([0; 6]), None);
+        assert_eq!(StationMacAddress::new([0xff; 6]), None);
+        assert_eq!(
+            StationMacAddress::new([0x01, 0, 0, 0, 0, 1]),
+            None,
+            "multicast"
+        );
+        assert_eq!(
+            StationMacAddress::new([0xff, 0xff, 0xff, 0xff, 0xff, 0xfe]),
+            None,
+            "multicast"
+        );
+        assert!(StationMacAddress::new([0xfe, 0xff, 0xff, 0xff, 0xff, 0xff]).is_some());
+        assert!(StationMacAddress::new([0, 0, 0, 0, 0, 1]).is_some());
     }
 
     #[test]

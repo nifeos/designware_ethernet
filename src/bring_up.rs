@@ -11,7 +11,9 @@
 use crate::cache_coherence::{self, Observation, Verdict};
 use crate::link::{Link, Speed};
 use crate::motorcomm_physical_layer_device::{self, Settings, SettingsSource};
-use crate::network_interface_controller::{self as controller, BusConfiguration, Identity};
+use crate::network_interface_controller::{
+    self as controller, BusConfiguration, Identity, StationMacAddress,
+};
 use crate::{
     DataPlane, DirectMemoryAccessRegion, Hardware, Tails, layout, management_data_io, registers,
 };
@@ -67,7 +69,7 @@ pub struct Inputs {
     /// Electronics Engineers (IEEE) 802.3 standard's name for it: the tree's `local-mac-address`,
     /// if it has one.
     #[doc(alias = "mac_address")]
-    pub station_mac_address: Option<[u8; 6]>,
+    pub station_mac_address: Option<StationMacAddress>,
     /// (`physical_layer_device_bus_address`, the IEEE 802.3 standard's physical layer device address) The physical layer device's MDIO
     /// address.
     #[doc(alias = "phy")]
@@ -165,7 +167,7 @@ pub struct Account {
     /// (`station_mac_address`, the IEEE 802.3 standard's name for a MAC address) The station address
     /// and where it came from.
     #[doc(alias = "mac_address")]
-    pub station_mac_address: Option<([u8; 6], AddressSource)>,
+    pub station_mac_address: Option<(StationMacAddress, AddressSource)>,
     /// How long each software reset took, in microseconds: the probe's, then the real one's.
     pub resets_microseconds: [u64; 2],
     /// The coherence probe's verdict and what it saw.
@@ -174,6 +176,18 @@ pub struct Account {
     pub link: Option<Link>,
     /// How long the link took to resolve, or how long was waited for it.
     pub link_wait_milliseconds: u64,
+}
+
+/// **What a bring-up that succeeded answers.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BroughtUp {
+    /// The station address programmed into the controller.
+    #[doc(alias = "mac_address")]
+    pub station_mac_address: StationMacAddress,
+    /// The negotiated link, or `None` when none resolved within [`LINK_WAIT_MILLISECONDS`]: the
+    /// rings are then programmed and the controller is not started.
+    pub link: Option<Link>,
 }
 
 /// **Bring the port up**, recording into `account` as it goes. On success the controller runs at
@@ -187,7 +201,7 @@ pub fn bring_up(
     port: &mut impl Port,
     inputs: &Inputs,
     account: &mut Account,
-) -> Result<([u8; 6], Option<Link>), Error> {
+) -> Result<BroughtUp, Error> {
     let id = Identity::read(port);
     account.version = id.version;
     account.direct_memory_access_physical_address_bits =
@@ -235,7 +249,10 @@ pub fn bring_up(
     .map_err(Error::Controller)?;
 
     let link = wait_for_link(port, inputs, account)?;
-    Ok((station, link))
+    Ok(BroughtUp {
+        station_mac_address: station,
+        link,
+    })
 }
 
 /// Identify the physical layer device, refuse any other part, and configure it for the board.
@@ -319,7 +336,7 @@ fn probe(
     port: &mut impl Port,
     id: &Identity,
     inputs: &Inputs,
-    station: [u8; 6],
+    station: StationMacAddress,
     account: &mut Account,
 ) -> Result<Verdict, Error> {
     let region = inputs.region_physical_address;
@@ -368,7 +385,8 @@ mod tests {
     };
 
     const REGION: u64 = 0x4800_0000;
-    const STATION: [u8; 6] = [0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c];
+    const STATION: StationMacAddress =
+        StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).unwrap();
     const GIGABIT: Link = Link {
         speed: Speed::Thousand,
         full_duplex: true,
@@ -398,7 +416,10 @@ mod tests {
         let mut account = Account::default();
         assert_eq!(
             bring_up(&mut p, &inputs(), &mut account),
-            Ok((STATION, Some(GIGABIT)))
+            Ok(BroughtUp {
+                station_mac_address: STATION,
+                link: Some(GIGABIT)
+            })
         );
         assert!(matches!(account.coherence, Some((Verdict::Coherent, _))));
         assert_eq!(
@@ -430,7 +451,10 @@ mod tests {
         let mut account = Account::default();
         assert_eq!(
             bring_up(&mut p, &inputs(), &mut account),
-            Ok((STATION, None))
+            Ok(BroughtUp {
+                station_mac_address: STATION,
+                link: None
+            })
         );
         assert!(account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS);
         assert_eq!(
@@ -584,7 +608,10 @@ mod tests {
         let mut account = Account::default();
         assert_eq!(
             bring_up(&mut p, &inputs(), &mut account),
-            Ok((STATION, None))
+            Ok(BroughtUp {
+                station_mac_address: STATION,
+                link: None
+            })
         );
         assert!(matches!(account.coherence, Some((Verdict::Coherent, _))));
         assert!(account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS);
@@ -606,7 +633,10 @@ mod tests {
             let mut account = Account::default();
             assert_eq!(
                 bring_up(&mut p, &inputs(), &mut account),
-                Ok((STATION, None)),
+                Ok(BroughtUp {
+                    station_mac_address: STATION,
+                    link: None
+                }),
                 "a step back at reading {readings}"
             );
             assert!(matches!(account.coherence, Some((Verdict::Coherent, _))));

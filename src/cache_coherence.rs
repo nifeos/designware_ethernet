@@ -15,7 +15,7 @@
 
 use crate::{
     CRC_BYTES, DataPlane, DirectMemoryAccessRegion, RECEIVE_DESCRIPTOR_WORD_3_OWNED_BY_DEVICE,
-    ReceiveVerdict, Tails, TransmitError, layout, receive_verdict, registers,
+    ReceiveVerdict, StationMacAddress, Tails, TransmitError, layout, receive_verdict, registers,
 };
 
 /// The probe frame's `EtherType`: IEEE 802's first local experimental type, which no real
@@ -35,7 +35,8 @@ pub const WAIT_MICROSECONDS: u64 = 100_000;
 /// **The probe frame**: addressed from and to `station_mac_address` (so the packet filter passes it),
 /// the experimental `EtherType`, and a payload whose every byte differs from [`POISON`] and from
 /// zero.
-pub fn probe_frame(station_mac_address: [u8; 6]) -> [u8; PROBE_FRAME_BYTES] {
+pub fn probe_frame(station_mac_address: StationMacAddress) -> [u8; PROBE_FRAME_BYTES] {
+    let station_mac_address = station_mac_address.octets();
     let mut frame = [0u8; PROBE_FRAME_BYTES];
     frame[..6].copy_from_slice(&station_mac_address);
     frame[6..12].copy_from_slice(&station_mac_address);
@@ -63,7 +64,7 @@ pub fn prepare(
     data_plane: &mut DataPlane,
     region: &mut impl DirectMemoryAccessRegion,
     tails: &mut impl Tails,
-    station_mac_address: [u8; 6],
+    station_mac_address: StationMacAddress,
 ) -> Result<(), TransmitError> {
     data_plane.start(region, tails);
     let poison = [POISON; PROBE_FRAME_BYTES + CRC_BYTES];
@@ -134,7 +135,7 @@ impl Observation {
 /// **Read the CPU's half of the observation** and pair it with the device's status word.
 pub fn observe(
     region: &impl DirectMemoryAccessRegion,
-    station_mac_address: [u8; 6],
+    station_mac_address: StationMacAddress,
     status: u32,
 ) -> Observation {
     let receive_descriptor_word_3 =
@@ -240,7 +241,8 @@ mod tests {
     const POSTED_RECEIVE_ENTRIES: u16 = RECEIVE_ENTRIES - 1;
 
     const PHYSICAL_ADDRESS: u64 = 0x4800_0000;
-    const STATION_MAC_ADDRESS: [u8; 6] = [0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c];
+    const STATION_MAC_ADDRESS: StationMacAddress =
+        StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).unwrap();
     const GIGABIT: Link = Link {
         speed: Speed::Thousand,
         full_duplex: true,
@@ -316,7 +318,7 @@ mod tests {
     fn the_probe_frame_is_never_mistaken_for_poison_or_silence() {
         let f = probe_frame(STATION_MAC_ADDRESS);
         assert!(f[14..].iter().all(|&b| b != POISON && b != 0));
-        assert_eq!(&f[..6], &STATION_MAC_ADDRESS);
+        assert_eq!(&f[..6], &STATION_MAC_ADDRESS.octets());
         assert_eq!(u16::from_be_bytes([f[12], f[13]]), PROBE_ETHERTYPE);
     }
 
