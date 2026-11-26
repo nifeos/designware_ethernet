@@ -8,11 +8,13 @@ Expected to fail: the harness's `assert!(n <= room)`, on any word with a valid l
 diff --git a/src/descriptor.rs b/src/descriptor.rs
 --- a/src/descriptor.rs
 +++ b/src/descriptor.rs
-@@ -225,7 +225,6 @@
-         return ReceiveVerdict::Drop;
-     };
-     let fits = (14..=MAXIMUM_FRAME_BYTES).contains(&length)
--        && length <= room
-         && wire as u64 <= BUFFER_BYTES;
+@@ -227,9 +227,6 @@
      if !fits {
          return ReceiveVerdict::Drop;
+     }
+-    if length > room {
+-        return ReceiveVerdict::NoRoom;
+-    }
+     ReceiveVerdict::Frame(length)
+ }
+ 

@@ -104,6 +104,7 @@ pub struct DataPlane {
     transmit_next: u16,
     transmit_clean: u16,
     dropped: u32,
+    dropped_for_room: u32,
 }
 
 impl DataPlane {
@@ -116,12 +117,22 @@ impl DataPlane {
             transmit_next: 0,
             transmit_clean: 0,
             dropped: 0,
+            dropped_for_room: 0,
         }
     }
 
-    /// Frames the device wrote that were not delivered, wrapping at `u32::MAX`.
+    /// Frames the device wrote that were not delivered, for any reason, wrapping at `u32::MAX`.
+    /// It includes [`DataPlane::dropped_for_room`].
     pub fn dropped(&self) -> u32 {
         self.dropped
+    }
+
+    /// Of [`DataPlane::dropped`], the good frames lost because the caller's `out` was shorter than
+    /// the frame, wrapping at `u32::MAX`. It stays zero for a caller that always offers
+    /// [`MAXIMUM_FRAME_BYTES`]; the rest of `dropped` is frames the device marked bad or could not
+    /// have meant.
+    pub fn dropped_for_room(&self) -> u32 {
+        self.dropped_for_room
     }
 
     /// The receive descriptor the next [`DataPlane::receive`] looks at.
@@ -175,9 +186,9 @@ impl DataPlane {
     /// [`RECEIVE_ENTRIES`] descriptors, so a device that keeps refilling the ring with error frames
     /// makes it return `None` and the caller polls again.
     ///
-    /// `out` is judged as the room for the frame: a frame longer than `out.len()` is dropped like a
-    /// bad one, consumed, counted and gone, so offer [`MAXIMUM_FRAME_BYTES`] unless losing longer
-    /// frames is wanted.
+    /// `out` must hold [`MAXIMUM_FRAME_BYTES`] for no good frame to be lost. A frame longer than
+    /// `out.len()` is consumed and gone, counted in both `dropped` and
+    /// [`DataPlane::dropped_for_room`], so a caller can tell its short buffer from a bad frame.
     pub fn receive(
         &mut self,
         region: &mut impl DirectMemoryAccessRegion,
@@ -199,7 +210,12 @@ impl DataPlane {
                     region.read_bytes(layout::receive_buffer(self.receive_next), &mut out[..n]);
                     Some(n)
                 }
-                _ => {
+                ReceiveVerdict::NoRoom => {
+                    self.dropped = self.dropped.wrapping_add(1);
+                    self.dropped_for_room = self.dropped_for_room.wrapping_add(1);
+                    None
+                }
+                ReceiveVerdict::Drop | ReceiveVerdict::NotYet => {
                     self.dropped = self.dropped.wrapping_add(1);
                     None
                 }

@@ -194,6 +194,10 @@ pub(crate) enum ReceiveVerdict {
     /// The device wrote it and it is not a frame to deliver: an error, a context descriptor, a
     /// frame spanning descriptors, or a length it could not have meant. Consumed and reposted.
     Drop,
+    /// A whole, error-free frame longer than the caller's room: consumed and reposted like
+    /// [`ReceiveVerdict::Drop`], but counted apart, since the caller's buffer was short and the
+    /// frame was good.
+    NoRoom,
 }
 
 /// **Judge a receive descriptor's word 3**, where `room` is how many bytes the caller can take.
@@ -219,11 +223,12 @@ pub(crate) fn receive_verdict(descriptor_word_3: u32, room: usize) -> ReceiveVer
     let Some(length) = wire.checked_sub(CRC_BYTES) else {
         return ReceiveVerdict::Drop;
     };
-    let fits = (14..=MAXIMUM_FRAME_BYTES).contains(&length)
-        && length <= room
-        && wire as u64 <= BUFFER_BYTES;
+    let fits = (14..=MAXIMUM_FRAME_BYTES).contains(&length) && wire as u64 <= BUFFER_BYTES;
     if !fits {
         return ReceiveVerdict::Drop;
+    }
+    if length > room {
+        return ReceiveVerdict::NoRoom;
     }
     ReceiveVerdict::Frame(length)
 }
