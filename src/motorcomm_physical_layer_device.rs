@@ -388,6 +388,36 @@ impl Settings {
     }
 }
 
+/// The fields [`Settings::to_word`] composes share no bit, each at the width the function itself
+/// bounds it to (not the width a caller happens to pass): each delay select is refused above
+/// `0xf`, each flag is one bit, the source is 0 to 2, and each drive is 25 bits, a code below 256
+/// or microamps below `1 << 24` shifted past its tag bit. Fields share no bit exactly when their
+/// sum is their `|`. The compiler checks it here, and the mutation exemptions for `to_word` name
+/// this constant.
+// The fields are written out inside the assertion, where no mutant reaches them, and clippy
+// folds the literals and calls the comparison constant, which is the point of it.
+#[allow(dead_code, clippy::eq_op, clippy::assertions_on_constants)]
+pub(crate) const SETTINGS_WORD_FIELDS_DO_NOT_OVERLAP: () = assert!(
+    0xf_u64
+        + (1 << 4)
+        + (0xf << 5)
+        + (1 << 9)
+        + (1 << 10)
+        + (1 << 11)
+        + (0x3 << 12)
+        + (((1 << 25) - 1) << 14)
+        + (((1 << 25) - 1) << 39)
+        == 0xf_u64
+            | (1 << 4)
+            | (0xf << 5)
+            | (1 << 9)
+            | (1 << 10)
+            | (1 << 11)
+            | (0x3 << 12)
+            | (((1 << 25) - 1) << 14)
+            | (((1 << 25) - 1) << 39)
+);
+
 /// **The pad drive code for a current at a voltage**, OpenBSD's `ytphy_yt8531_ds_map`, or `None`
 /// for a pair the table has no code for, which includes everything at 2.5 V. OpenBSD writes the
 /// part's default of 3 for such a pair and goes on, and so does [`configure`], which says so in
@@ -473,6 +503,9 @@ fn modify_extended(
     clear: u16,
     set: u16,
 ) -> Result<u16, management_data_io::Error> {
+    // Every caller sets bits only inside the field it clears, so the `|` below adds to bits the
+    // `& !clear` just emptied; the mutation exemption for this line rests on this assertion.
+    debug_assert!(set & !clear == 0, "a set bit outside the cleared field");
     let value = (read_extended(bus, physical_layer_device_bus_address, extended)? & !clear) | set;
     write_extended(bus, physical_layer_device_bus_address, extended, value)?;
     Ok(value)

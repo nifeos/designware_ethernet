@@ -476,6 +476,10 @@ pub(crate) const CONFIGURED_BUS_FIELDS_DO_NOT_OVERLAP: () = assert!(
             & (registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_BYTES_MASK
                 << registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_SHIFT)
             == 0
+        && ((BUFFER_BYTES as u32) << registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_SHIFT)
+            & !(registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_BYTES_MASK
+                << registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_SHIFT)
+            == 0
         && (0xffff << registers::TRANSMIT_FLOW_CONTROL_QUEUE_0_PAUSE_TIME_SHIFT)
             & registers::TRANSMIT_FLOW_CONTROL_QUEUE_0_ENABLE
             == 0
