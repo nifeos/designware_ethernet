@@ -103,7 +103,7 @@ pub struct DataPlane {
     receive_next: u16,
     transmit_next: u16,
     transmit_clean: u16,
-    /// Frames the device wrote that were not delivered, for a report line.
+    /// Frames the device wrote that were not delivered.
     pub dropped: u32,
 }
 

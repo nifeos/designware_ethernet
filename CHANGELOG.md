@@ -25,6 +25,8 @@ sentence beside it.
   return the step's error.
 - `Applied` gains `receive_clock_drive_defaulted` and `receive_data_drive_defaulted`. A drive
   current the table lacks still gets the part's default, and the caller can now report it.
+- `cache_coherence` no longer exports `is_transmit_complete` or `POSTED_RECEIVE_ENTRIES`. Only the
+  crate's own tests used them, so the tests now hold their own copies.
 - Named constants with OpenBSD's spellings as aliases replace the last bare bits: flow control,
   the jumbo bit and the transmit flush limit.
 
