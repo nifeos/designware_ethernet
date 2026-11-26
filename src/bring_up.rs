@@ -7,6 +7,11 @@
 //! The clocks, the resets and the board's interface select come first and are not here: they sit
 //! in windows the controller does not own. So does everything a board's device tree says, which
 //! the caller hands over in [`Inputs`].
+//!
+//! The one bring-up here, [`bring_up_with_motorcomm_yt8531`], serves a board whose physical layer
+//! device is a Motorcomm YT8531 and refuses any other. A board with another device drives the
+//! controller with the module functions this one calls; a bring-up that takes any physical layer
+//! device can follow as an addition.
 
 use crate::cache_coherence::{self, Observation, Verdict};
 use crate::link::{Link, Speed};
@@ -190,14 +195,16 @@ pub struct BroughtUp {
     pub link: Option<Link>,
 }
 
-/// **Bring the port up**, recording into `account` as it goes. On success the controller runs at
+/// **Bring the port up with a Motorcomm YT8531 physical layer device**, recording into `account`
+/// as it goes. A device with any other identifier is refused with
+/// [`Error::UnknownPhysicalLayerDevice`]. On success the controller runs at
 /// the link's speed with both rings programmed and empty, and the answer is the station address
 /// and the link; with no link the rings are programmed and the controller is not started.
 ///
 /// # Errors
 ///
 /// The first [`Error`] the sequence meets; `account` holds what it saw until then.
-pub fn bring_up(
+pub fn bring_up_with_motorcomm_yt8531(
     port: &mut impl Port,
     inputs: &Inputs,
     account: &mut Account,
@@ -415,7 +422,7 @@ mod tests {
         let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Ok(BroughtUp {
                 station_mac_address: STATION,
                 link: Some(GIGABIT)
@@ -450,7 +457,7 @@ mod tests {
         let mut p = port(Memory::coherent(REGION), None);
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Ok(BroughtUp {
                 station_mac_address: STATION,
                 link: None
@@ -471,7 +478,7 @@ mod tests {
         let mut p = port(Memory::write_back_unsnooped(REGION), Some(GIGABIT));
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Err(Error::NotCoherent(Verdict::DeviceCannotSeeCpuWrites))
         );
         assert!(account.coherence.is_some());
@@ -488,7 +495,7 @@ mod tests {
             ..inputs()
         };
         assert_eq!(
-            bring_up(&mut p, &no_tree, &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &no_tree, &mut account),
             Err(Error::NoStationAddress)
         );
         assert_eq!(account.physical_layer_device_id, 0);
@@ -502,7 +509,7 @@ mod tests {
             .write_raw(PHYSICAL_LAYER_DEVICE_ID_1_REGISTER, 0x1234);
         let mut account = Account::default();
         assert!(matches!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Err(Error::UnknownPhysicalLayerDevice { .. })
         ));
         assert_eq!(account.physical_layer_device, None);
@@ -516,7 +523,7 @@ mod tests {
         p.stop_receive_clock();
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Err(Error::Controller(controller::Error::ResetTimeout))
         );
         assert!(account.physical_layer_device.is_some());
@@ -532,7 +539,7 @@ mod tests {
             p.set_register(registers::CORE_VERSION_REGISTER, version);
             let mut account = Account::default();
             assert_eq!(
-                bring_up(&mut p, &inputs(), &mut account),
+                bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
                 Err(Error::Silent { version })
             );
             assert_eq!(account.version, version);
@@ -546,7 +553,7 @@ mod tests {
     fn the_link_wait_is_reported_in_milliseconds_of_the_time_spent() {
         let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
         let mut account = Account::default();
-        bring_up(&mut p, &inputs(), &mut account).unwrap();
+        bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();
         assert!(
             account.link_wait_milliseconds < LINK_POLL_MICROSECONDS / 1000,
             "a link already up costs under one poll: {}",
@@ -554,7 +561,7 @@ mod tests {
         );
         let mut p = port(Memory::coherent(REGION), None);
         let mut account = Account::default();
-        bring_up(&mut p, &inputs(), &mut account).unwrap();
+        bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();
         assert!(account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS);
         assert!(
             account.link_wait_milliseconds
@@ -592,7 +599,7 @@ mod tests {
             r.write_u64(last - 4096, 0xfeed);
         });
         let mut account = Account::default();
-        bring_up(&mut p, &inputs(), &mut account).unwrap();
+        bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();
         let (end, earlier) = p.with(|r, _| (r.read_u64(last), r.read_u64(last - 4096)));
         assert_eq!(end, 0, "the last word");
         assert_eq!(earlier, 0, "a word a page before it");
@@ -607,7 +614,7 @@ mod tests {
         p.set_clock_microseconds(1 << 40);
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Ok(BroughtUp {
                 station_mac_address: STATION,
                 link: None
@@ -632,7 +639,7 @@ mod tests {
             p.step_clock_back(readings, 1000);
             let mut account = Account::default();
             assert_eq!(
-                bring_up(&mut p, &inputs(), &mut account),
+                bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
                 Ok(BroughtUp {
                     station_mac_address: STATION,
                     link: None
