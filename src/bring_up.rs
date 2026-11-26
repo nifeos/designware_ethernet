@@ -83,6 +83,11 @@ pub struct Inputs {
     /// The physical layer device's board settings.
     #[doc(alias = "phy")]
     pub physical_layer_device: Settings,
+    /// Whether an inconclusive coherence probe ([`Verdict::Inconclusive`]: the loopback frame never
+    /// completed, so nothing was measured) lets the bring-up go on as if the platform were
+    /// coherent. `false` by default, which refuses it with [`Error::NotCoherent`]; set it only for
+    /// a platform known to be coherent whose loopback cannot complete.
+    pub accept_inconclusive_coherence: bool,
 }
 
 impl Inputs {
@@ -101,6 +106,7 @@ impl Inputs {
             station_mac_address: None,
             physical_layer_device_bus_address,
             physical_layer_device,
+            accept_inconclusive_coherence: false,
         }
     }
 }
@@ -238,7 +244,12 @@ pub fn bring_up_with_motorcomm_yt8531(
     account.resets_microseconds[0] = controller::soft_reset(port).map_err(Error::Controller)?;
 
     let verdict = probe(port, &id, inputs, station, account)?;
-    if !matches!(verdict, Verdict::Coherent | Verdict::Inconclusive) {
+    let accepted = match verdict {
+        Verdict::Coherent => true,
+        Verdict::Inconclusive => inputs.accept_inconclusive_coherence,
+        _ => false,
+    };
+    if !accepted {
         return Err(Error::NotCoherent(verdict));
     }
 
@@ -406,6 +417,7 @@ mod tests {
             station_mac_address: Some(STATION),
             physical_layer_device_bus_address: 0,
             physical_layer_device: PHYSICAL_LAYER_DEVICE_SETTINGS,
+            accept_inconclusive_coherence: false,
         }
     }
 
@@ -586,6 +598,44 @@ mod tests {
             cache_coherence::WAIT_MICROSECONDS
         );
         assert!(account.coherence.is_some());
+    }
+
+    /// A probe that measured nothing refuses the bring-up unless the inputs accept it: the
+    /// default is the stricter answer, and the account holds what the probe saw either way.
+    #[test]
+    fn an_inconclusive_probe_refuses_the_bring_up_unless_the_inputs_accept_it() {
+        let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
+        p.break_loopback();
+        let mut account = Account::default();
+        assert_eq!(
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
+            Err(Error::NotCoherent(Verdict::Inconclusive))
+        );
+        assert!(matches!(
+            account.coherence,
+            Some((Verdict::Inconclusive, _))
+        ));
+        assert!(
+            !Inputs::new(REGION, BUS_CONFIGURATION, 0, PHYSICAL_LAYER_DEVICE_SETTINGS)
+                .accept_inconclusive_coherence
+        );
+
+        let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
+        p.break_loopback();
+        let mut accepting = inputs();
+        accepting.accept_inconclusive_coherence = true;
+        let mut account = Account::default();
+        assert_eq!(
+            bring_up_with_motorcomm_yt8531(&mut p, &accepting, &mut account),
+            Ok(BroughtUp {
+                station_mac_address: STATION,
+                link: Some(GIGABIT)
+            })
+        );
+        assert!(matches!(
+            account.coherence,
+            Some((Verdict::Inconclusive, _))
+        ));
     }
 
     /// The region is zeroed, the whole of it: a word the probe or a previous wiring left behind
