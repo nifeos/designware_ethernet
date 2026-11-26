@@ -142,7 +142,11 @@ pub(crate) const fn mac_address_words(station_mac_address: [u8; 6]) -> (u32, u32
 /// **How the DMA meets the bus**: the `snps,*` properties of a board's node and its
 /// `snps,axi-config`. The crate holds no board's; the caller reads it from the board's device
 /// tree, or carries it, and passes it in [`crate::bring_up::Inputs`].
+///
+/// Build one with [`BusConfiguration::new`] and set each field the board's tree states; the
+/// struct is `#[non_exhaustive]`, so a setting added later is not a break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BusConfiguration {
     /// `snps,fixed-burst`.
     pub fixed_burst: bool,
@@ -165,6 +169,28 @@ pub struct BusConfiguration {
     pub read_outstanding: u32,
     /// `snps,wr_osr_lmt`.
     pub write_outstanding: u32,
+}
+
+impl BusConfiguration {
+    /// Both channels' burst lengths, in beats (`snps,txpbl` and `snps,rxpbl`), with every other
+    /// setting off or zero: no fixed burst, no eight-times multiplier, store and forward rather
+    /// than threshold mode, no system bus burst length permitted, and both outstanding request
+    /// limits zero. Set the fields the board's tree states after it.
+    pub const fn new(
+        transmit_channel_burst_beats: u32,
+        receive_channel_burst_beats: u32,
+    ) -> BusConfiguration {
+        BusConfiguration {
+            fixed_burst: false,
+            channel_burst_beats_times_8: false,
+            transmit_channel_burst_beats,
+            receive_channel_burst_beats,
+            threshold_mode: false,
+            bus_burst_beats_permitted: 0,
+            read_outstanding: 0,
+            write_outstanding: 0,
+        }
+    }
 }
 
 /// The receive operation mode word for a queue of `queue_bytes` bytes, OpenBSD's arithmetic: the

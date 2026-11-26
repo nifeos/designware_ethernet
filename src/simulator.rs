@@ -806,7 +806,7 @@ mod tests {
         let mut network_interface_controller =
             NetworkInterfaceController::new(0, Memory::coherent(0));
         let id = management_data_io::physical_layer_device_id(
-            &mut management_data_io::Bus(&mut network_interface_controller),
+            &mut management_data_io::Bus::new(&mut network_interface_controller),
             0,
         )
         .unwrap();

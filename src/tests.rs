@@ -54,7 +54,7 @@ fn frames_arrive_in_order_through_more_than_one_lap_of_the_ring() {
         network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut out)),
         None
     );
-    assert_eq!(data_plane.dropped, 0);
+    assert_eq!(data_plane.dropped(), 0);
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn a_bad_frame_is_dropped_and_counted_without_stalling_the_ring() {
         .with(|r, t| data_plane.receive(r, t, &mut out))
         .unwrap();
     assert_eq!(&out[..n], &good[..]);
-    assert_eq!(data_plane.dropped, 1);
+    assert_eq!(data_plane.dropped(), 1);
 }
 
 /// A ring full of error frames is consumed in one call that returns `None`, counts every frame,
@@ -114,7 +114,7 @@ fn a_ring_full_of_error_frames_is_consumed_in_one_call_and_the_next_good_frame_a
         network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut out)),
         None
     );
-    assert_eq!(data_plane.dropped, u32::from(RECEIVE_ENTRIES - 1));
+    assert_eq!(data_plane.dropped(), u32::from(RECEIVE_ENTRIES - 1));
     let good = frame(90, 3);
     assert!(network_interface_controller.wire_in(&good));
     let n = network_interface_controller
@@ -208,9 +208,9 @@ fn an_error_frame_storm_ends_one_receive_call_at_its_budget() {
     let mut data_plane = DataPlane::new(PHYSICAL_ADDRESS);
     let mut out = vec![0u8; MAXIMUM_FRAME_BYTES];
     assert_eq!(data_plane.receive(&mut storm, &mut NoTails, &mut out), None);
-    assert_eq!(data_plane.dropped, u32::from(RECEIVE_ENTRIES));
+    assert_eq!(data_plane.dropped(), u32::from(RECEIVE_ENTRIES));
     assert_eq!(data_plane.receive(&mut storm, &mut NoTails, &mut out), None);
-    assert_eq!(data_plane.dropped, 2 * u32::from(RECEIVE_ENTRIES));
+    assert_eq!(data_plane.dropped(), 2 * u32::from(RECEIVE_ENTRIES));
 }
 
 #[test]
@@ -592,7 +592,7 @@ fn a_frame_longer_than_the_offered_room_is_dropped_and_counted() {
         network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut short)),
         None
     );
-    assert_eq!(data_plane.dropped, 1);
+    assert_eq!(data_plane.dropped(), 1);
 }
 
 /// The three answers `receive_verdict` gives: a frame with the CRC stripped, a descriptor the

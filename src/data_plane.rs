@@ -103,8 +103,7 @@ pub struct DataPlane {
     receive_next: u16,
     transmit_next: u16,
     transmit_clean: u16,
-    /// Frames the device wrote that were not delivered.
-    pub dropped: u32,
+    dropped: u32,
 }
 
 impl DataPlane {
@@ -118,6 +117,11 @@ impl DataPlane {
             transmit_clean: 0,
             dropped: 0,
         }
+    }
+
+    /// Frames the device wrote that were not delivered, wrapping at `u32::MAX`.
+    pub fn dropped(&self) -> u32 {
+        self.dropped
     }
 
     /// The receive descriptor the next [`DataPlane::receive`] looks at.

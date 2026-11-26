@@ -52,8 +52,10 @@ pub trait Port: Hardware {
 }
 
 /// **What the board and its tree say about this port**, everything the bring-up needs that the
-/// controller cannot tell it.
+/// controller cannot tell it. Build one with [`Inputs::new`] and set the optional fields after
+/// it; the struct is `#[non_exhaustive]`, so an input added later is not a break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Inputs {
     /// The DMA region's physical base, which descriptors name.
     pub region_physical_address: u64,
@@ -74,6 +76,26 @@ pub struct Inputs {
     /// The physical layer device's board settings.
     #[doc(alias = "phy")]
     pub physical_layer_device: Settings,
+}
+
+impl Inputs {
+    /// The inputs every port needs: the DMA region's physical base, the bus configuration, and the
+    /// physical layer device's MDIO address and board settings. The station address starts as
+    /// `None`, so the bring-up takes the one the controller's registers hold.
+    pub const fn new(
+        region_physical_address: u64,
+        bus_configuration: BusConfiguration,
+        physical_layer_device_bus_address: u8,
+        physical_layer_device: Settings,
+    ) -> Inputs {
+        Inputs {
+            region_physical_address,
+            bus_configuration,
+            station_mac_address: None,
+            physical_layer_device_bus_address,
+            physical_layer_device,
+        }
+    }
 }
 
 /// How long the bring-up waits for the physical layer device to resolve a link after autonegotiation restarts. A
@@ -223,9 +245,11 @@ fn bring_up_physical_layer_device(
     account: &mut Account,
 ) -> Result<(), Error> {
     let device = inputs.physical_layer_device_bus_address;
-    account.physical_layer_device_id =
-        management_data_io::physical_layer_device_id(&mut management_data_io::Bus(port), device)
-            .map_err(Error::ManagementDataIo)?;
+    account.physical_layer_device_id = management_data_io::physical_layer_device_id(
+        &mut management_data_io::Bus::new(port),
+        device,
+    )
+    .map_err(Error::ManagementDataIo)?;
     if account.physical_layer_device_id
         != motorcomm_physical_layer_device::MOTORCOMM_YT8531_PHYSICAL_LAYER_DEVICE_ID
     {
@@ -234,7 +258,7 @@ fn bring_up_physical_layer_device(
         });
     }
     let applied = motorcomm_physical_layer_device::configure(
-        &mut management_data_io::Bus(port),
+        &mut management_data_io::Bus::new(port),
         device,
         &inputs.physical_layer_device,
     )
@@ -254,12 +278,15 @@ fn wait_for_link(
     account: &mut Account,
 ) -> Result<Option<Link>, Error> {
     let device = inputs.physical_layer_device_bus_address;
-    management_data_io::restart_autonegotiation(&mut management_data_io::Bus(&mut *port), device)
-        .map_err(Error::ManagementDataIo)?;
+    management_data_io::restart_autonegotiation(
+        &mut management_data_io::Bus::new(&mut *port),
+        device,
+    )
+    .map_err(Error::ManagementDataIo)?;
     let started = port.now_microseconds();
     let link = loop {
         if let Some(l) = motorcomm_physical_layer_device::read_link(
-            &mut management_data_io::Bus(&mut *port),
+            &mut management_data_io::Bus::new(&mut *port),
             device,
         )
         .map_err(Error::ManagementDataIo)?
@@ -275,7 +302,7 @@ fn wait_for_link(
     account.link = link;
     if let Some(l) = link {
         motorcomm_physical_layer_device::apply_speed(
-            &mut management_data_io::Bus(&mut *port),
+            &mut management_data_io::Bus::new(&mut *port),
             device,
             &inputs.physical_layer_device,
             l.speed,

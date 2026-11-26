@@ -254,14 +254,23 @@ pub trait ManagementDataIo {
 }
 
 /// The MAC's MDIO registers, through whatever [`Hardware`] reaches the controller.
-pub struct Bus<'a, H: Hardware>(pub &'a mut H);
+pub struct Bus<'a, H: Hardware> {
+    hardware: &'a mut H,
+}
+
+impl<'a, H: Hardware> Bus<'a, H> {
+    /// The MDIO bus of the controller `hardware` reaches.
+    pub fn new(hardware: &'a mut H) -> Bus<'a, H> {
+        Bus { hardware }
+    }
+}
 
 impl<H: Hardware> Bus<'_, H> {
     fn wait(&mut self, physical_layer_device_bus_address: u8, register: u8) -> Result<(), Error> {
         let mut waited = 0;
         loop {
             if self
-                .0
+                .hardware
                 .read(registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER)
                 & COMMAND_BUSY
                 == 0
@@ -274,7 +283,7 @@ impl<H: Hardware> Bus<'_, H> {
                     register,
                 });
             }
-            self.0.delay_microseconds(POLL_MICROSECONDS);
+            self.hardware.delay_microseconds(POLL_MICROSECONDS);
             waited += POLL_MICROSECONDS;
         }
     }
@@ -284,12 +293,14 @@ impl<H: Hardware> ManagementDataIo for Bus<'_, H> {
     fn read(&mut self, physical_layer_device_bus_address: u8, register: u8) -> Result<u16, Error> {
         // A command still running from someone else (firmware) would be overwritten mid-flight.
         self.wait(physical_layer_device_bus_address, register)?;
-        self.0.write(
+        self.hardware.write(
             registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER,
             command_word(physical_layer_device_bus_address, register, false),
         );
         self.wait(physical_layer_device_bus_address, register)?;
-        Ok(self.0.read(registers::MAC_MANAGEMENT_DATA_IO_DATA_REGISTER) as u16)
+        Ok(self
+            .hardware
+            .read(registers::MAC_MANAGEMENT_DATA_IO_DATA_REGISTER) as u16)
     }
 
     fn write(
@@ -299,11 +310,11 @@ impl<H: Hardware> ManagementDataIo for Bus<'_, H> {
         value: u16,
     ) -> Result<(), Error> {
         self.wait(physical_layer_device_bus_address, register)?;
-        self.0.write(
+        self.hardware.write(
             registers::MAC_MANAGEMENT_DATA_IO_DATA_REGISTER,
             u32::from(value),
         );
-        self.0.write(
+        self.hardware.write(
             registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER,
             command_word(physical_layer_device_bus_address, register, true),
         );
@@ -465,7 +476,7 @@ mod tests {
     fn a_read_issues_one_read_command_and_returns_the_data_register() {
         let mut hardware = Pair::new(0xbeef, 3);
         assert_eq!(
-            Bus(&mut hardware).read(4, BASIC_MODE_STATUS_REGISTER),
+            Bus::new(&mut hardware).read(4, BASIC_MODE_STATUS_REGISTER),
             Ok(0xbeef)
         );
         assert_eq!(
@@ -486,7 +497,7 @@ mod tests {
     fn a_write_puts_the_data_down_before_the_command_that_sends_it() {
         // The other order would send whatever the data register held before.
         let mut hardware = Pair::new(0, 2);
-        Bus(&mut hardware)
+        Bus::new(&mut hardware)
             .write(1, BASIC_MODE_CONTROL_REGISTER, 0x1200)
             .unwrap();
         assert_eq!(
@@ -506,7 +517,7 @@ mod tests {
         let mut hardware = Pair::new(0x1234, 2);
         hardware.bus_address_register = command_word(7, 9, false); // firmware's read, in flight
         assert_eq!(
-            Bus(&mut hardware).read(0, PHYSICAL_LAYER_DEVICE_ID_1_REGISTER),
+            Bus::new(&mut hardware).read(0, PHYSICAL_LAYER_DEVICE_ID_1_REGISTER),
             Ok(0x1234)
         );
         // Nothing was written until the firmware's command had cleared its busy bit.
@@ -520,7 +531,7 @@ mod tests {
         hardware.stuck = true;
         hardware.bus_address_register = COMMAND_BUSY;
         assert_eq!(
-            Bus(&mut hardware).read(3, BASIC_MODE_STATUS_REGISTER),
+            Bus::new(&mut hardware).read(3, BASIC_MODE_STATUS_REGISTER),
             Err(Error::Timeout {
                 physical_layer_device_bus_address: 3,
                 register: BASIC_MODE_STATUS_REGISTER
@@ -534,7 +545,7 @@ mod tests {
         let mut hardware = Pair::new(0, 0);
         hardware.stuck = true;
         assert_eq!(
-            Bus(&mut hardware).write(2, BASIC_MODE_CONTROL_REGISTER, 1),
+            Bus::new(&mut hardware).write(2, BASIC_MODE_CONTROL_REGISTER, 1),
             Err(Error::Timeout {
                 physical_layer_device_bus_address: 2,
                 register: BASIC_MODE_CONTROL_REGISTER

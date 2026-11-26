@@ -248,8 +248,12 @@ pub enum SettingsSource {
     Fallback,
 }
 
-/// **What the board wants of this physical layer device.**
+/// **What the board wants of this physical layer device.** Build one with [`Settings::new`] from
+/// a vendor tree's register values or a caller's own, or with [`Settings::from_mainline`] from
+/// mainline's quantities; the struct is `#[non_exhaustive]`, so a setting added later is not a
+/// break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Settings {
     /// The receive delay select, 0 to 15, in 150 ps steps.
     pub receive_delay: u8,
@@ -273,6 +277,30 @@ const FIXED_DELAY_PICOSECONDS: u32 = 1900;
 const STEP_PICOSECONDS: u32 = 150;
 
 impl Settings {
+    /// **Settings from their register values**, as the vendor tree states them or as a caller
+    /// chooses for its board: the receive and transmit delay selects (0 to 15, in 150 ps steps),
+    /// the receive clock's fixed extra delay, the two pad drives, the transmit clock inversion at
+    /// 10, 100 and 1000 Mbit/s, and which spelling they came from.
+    pub const fn new(
+        receive_delay: u8,
+        receive_fixed_delay: bool,
+        transmit_delay: u8,
+        receive_clock_drive: PadDriveStrength,
+        receive_data_drive: PadDriveStrength,
+        transmit_clock_inverted: [bool; 3],
+        source: SettingsSource,
+    ) -> Settings {
+        Settings {
+            receive_delay,
+            receive_fixed_delay,
+            transmit_delay,
+            receive_clock_drive,
+            receive_data_drive,
+            transmit_clock_inverted,
+            source,
+        }
+    }
+
     /// **These settings as one word**: bits 3:0 the receive delay, 4 the fixed delay, 8:5 the
     /// transmit delay, 11:9 the three clock inversions (10, 100 and 1000 Mbit/s from bit 9), 13:12
     /// the source (0 vendor, 1 mainline, 2 fallback), then the receive clock drive at bit 14 and
