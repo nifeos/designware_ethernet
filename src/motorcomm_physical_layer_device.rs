@@ -126,7 +126,7 @@ pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_RECEIVE_CLOCK_DRIVE
 pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_RECEIVE_DATA_DRIVE_STRENGTH_MASK: u16 =
     (1 << 12) | (0x3 << 4);
 /// The mask's two fields share no bit, so its `|` is its `^`, which the compiler checks here; the
-/// exclusion of the mask's or-versus-xor mutant names this constant. The clippy lints fold the
+/// exemption of the mask's or-versus-xor mutant names this constant. The clippy lints fold the
 /// literals; that is what a gate is, allowed here for exactly that reason.
 #[allow(clippy::assertions_on_constants, clippy::eq_op)]
 #[allow(dead_code)]
@@ -216,7 +216,7 @@ pub(crate) const fn link_from_registers(
 }
 
 /// The 100BASE-T4 and `100BASE-TX` partner abilities share no bit, so the one `|` in
-/// `link_from_registers` is its `^`, which the compiler checks here; the mutation exclusion for
+/// `link_from_registers` is its `^`, which the compiler checks here; the mutation exemption for
 /// `link_from_registers` names this constant.
 #[allow(dead_code)]
 pub(crate) const PARTNER_HUNDRED_MEGABIT_ABILITIES_DO_NOT_OVERLAP: () = assert!(
@@ -642,7 +642,7 @@ fn configure_extended_registers(
 
 /// The delay and drive fields the two words compose share no bit, and the transmit delay select
 /// is zero: every `|` here is its `^`, and a shift by `TRANSMIT_DELAY_SELECT_SHIFT` is the identity; the
-/// compiler checks both here, and the mutation exclusions for `configure` name this constant.
+/// compiler checks both here, and the mutation exemptions for `configure` name this constant.
 #[allow(dead_code)]
 pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_DELAY_AND_DRIVE_FIELDS_DO_NOT_OVERLAP: () = assert!(
     (0xf << RECEIVE_DELAY_SELECT_SHIFT) & (0xf << TRANSMIT_DELAY_SELECT_SHIFT) == 0

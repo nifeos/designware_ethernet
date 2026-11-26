@@ -200,7 +200,7 @@ pub(crate) fn receive_queue_mode(current: u32, bus: &BusConfiguration, queue_byt
 
 /// The fields this word composes share no bit, so every `|` here is its `^`: store-and-forward
 /// against the threshold field, and the two flow-control threshold fields against each other;
-/// the compiler checks it here, and the mutation exclusion for `receive_queue_mode` names this
+/// the compiler checks it here, and the mutation exemption for `receive_queue_mode` names this
 /// constant. Clippy's `eq_op` lint folds the second conjunct's literals to `0 == 0`; that is
 /// what a gate is, allowed here for exactly that reason.
 #[allow(clippy::eq_op)]
@@ -234,7 +234,7 @@ pub(crate) fn transmit_queue_mode(current: u32, bus: &BusConfiguration, queue_by
 }
 
 /// Store-and-forward and the threshold field share no bit, so the one `|` here is its `^`, which
-/// the compiler checks here; the mutation exclusion for `transmit_queue_mode` names this
+/// the compiler checks here; the mutation exemption for `transmit_queue_mode` names this
 /// constant.
 #[allow(dead_code)]
 pub(crate) const TRANSMIT_QUEUE_MODE_FIELDS_DO_NOT_OVERLAP: () = assert!(
@@ -523,7 +523,7 @@ pub const fn mac_configuration(current: u32, link: Link, loopback: bool) -> u32 
 
 /// The MAC word's fields share no bit: the speed, duplex and loopback bits the function clears
 /// first, and the five bits the final chain sets; the compiler checks it here, and the mutation
-/// exclusion for `mac_configuration` names this constant. A swap inside either group is
+/// exemption for `mac_configuration` names this constant. A swap inside either group is
 /// `|`-versus-`^` over disjoint bits; the chain's first swap toggles `configuration` itself, and
 /// `the_mac_word_from_zero_and_from_all_ones` kills it.
 #[allow(dead_code)]

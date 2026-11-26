@@ -207,7 +207,7 @@ pub(crate) const fn command_word(
 
 /// The command word's five fields share no bit, so its `|`s are its `^`s: the clock range, the
 /// physical layer device and register addresses (five bits each, reduced by mask), the operation, and the busy
-/// bit; the compiler checks the pairwise disjointness here, and the mutation exclusion for
+/// bit; the compiler checks the pairwise disjointness here, and the mutation exemption for
 /// `command_word` names this constant. Each operand enters through its own field mask.
 #[allow(dead_code)]
 pub(crate) const COMMAND_WORD_FIELDS_DO_NOT_OVERLAP: () = assert!(
@@ -331,7 +331,7 @@ pub fn physical_layer_device_id(
 
 /// The identifier's high half is shifted above the low half's whole width, so the halves share no
 /// bit for every value the bus can return; the compiler checks it here, and the mutation
-/// exclusion for `physical_layer_device_id` names this constant.
+/// exemption for `physical_layer_device_id` names this constant.
 #[allow(dead_code)]
 pub(crate) const PHYSICAL_LAYER_DEVICE_ID_HALVES_DO_NOT_OVERLAP: () =
     assert!(((u16::MAX as u32) << 16) & (u16::MAX as u32) == 0);
@@ -373,7 +373,7 @@ pub fn restart_autonegotiation(
 }
 
 /// The enable and restart bits share no bit, so the swap between them is `|`-versus-`^` over
-/// disjoint bits; the compiler checks it here, and the mutation exclusion for
+/// disjoint bits; the compiler checks it here, and the mutation exemption for
 /// `restart_autonegotiation` names this constant.
 #[allow(dead_code)]
 pub(crate) const AUTONEGOTIATION_ENABLE_AND_RESTART_DO_NOT_OVERLAP: () = assert!(
