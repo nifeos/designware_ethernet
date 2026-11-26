@@ -28,7 +28,8 @@ use crate::{
 const LINE: u64 = 64;
 
 /// The bus configuration the tests program: fixed bursts of 16 beats on each channel, threshold
-/// mode, every system bus burst length from 32 to 256 beats, and 15 outstanding requests each way.
+/// mode, every system bus burst length from 32 to 256 beats, 15 outstanding requests each way, and
+/// an MDIO clock range other than the default, so a test sees the bring-up pass it on.
 pub(crate) const BUS_CONFIGURATION: BusConfiguration = BusConfiguration {
     fixed_burst: true,
     channel_burst_beats_times_8: false,
@@ -42,6 +43,7 @@ pub(crate) const BUS_CONFIGURATION: BusConfiguration = BusConfiguration {
             | registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_BURST_32_BEATS_PERMITTED,
     read_outstanding: 0xf,
     write_outstanding: 0xf,
+    management_data_io_clock_range: crate::management_data_io::ClockRange::From250To300Megahertz,
 };
 
 /// The physical layer device settings the tests configure, as a caller's own defaults

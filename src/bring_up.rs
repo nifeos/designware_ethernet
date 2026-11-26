@@ -281,7 +281,10 @@ fn bring_up_physical_layer_device(
 ) -> Result<(), Error> {
     let device = inputs.physical_layer_device_bus_address;
     account.physical_layer_device_id = management_data_io::physical_layer_device_id(
-        &mut management_data_io::Bus::new(port),
+        &mut management_data_io::Bus::with_clock_range(
+            port,
+            inputs.bus_configuration.management_data_io_clock_range,
+        ),
         device,
     )
     .map_err(Error::ManagementDataIo)?;
@@ -293,7 +296,10 @@ fn bring_up_physical_layer_device(
         });
     }
     let applied = motorcomm_physical_layer_device::configure(
-        &mut management_data_io::Bus::new(port),
+        &mut management_data_io::Bus::with_clock_range(
+            port,
+            inputs.bus_configuration.management_data_io_clock_range,
+        ),
         device,
         &inputs.physical_layer_device,
     )
@@ -314,14 +320,20 @@ fn wait_for_link(
 ) -> Result<Option<Link>, Error> {
     let device = inputs.physical_layer_device_bus_address;
     management_data_io::restart_autonegotiation(
-        &mut management_data_io::Bus::new(&mut *port),
+        &mut management_data_io::Bus::with_clock_range(
+            &mut *port,
+            inputs.bus_configuration.management_data_io_clock_range,
+        ),
         device,
     )
     .map_err(Error::ManagementDataIo)?;
     let started = port.now_microseconds();
     let link = loop {
         if let Some(l) = motorcomm_physical_layer_device::read_link(
-            &mut management_data_io::Bus::new(&mut *port),
+            &mut management_data_io::Bus::with_clock_range(
+                &mut *port,
+                inputs.bus_configuration.management_data_io_clock_range,
+            ),
             device,
         )
         .map_err(Error::ManagementDataIo)?
@@ -337,7 +349,10 @@ fn wait_for_link(
     account.link = link;
     if let Some(l) = link {
         motorcomm_physical_layer_device::apply_speed(
-            &mut management_data_io::Bus::new(&mut *port),
+            &mut management_data_io::Bus::with_clock_range(
+                &mut *port,
+                inputs.bus_configuration.management_data_io_clock_range,
+            ),
             device,
             &inputs.physical_layer_device,
             l.speed,
@@ -598,6 +613,25 @@ mod tests {
             cache_coherence::WAIT_MICROSECONDS
         );
         assert!(account.coherence.is_some());
+    }
+
+    /// Every MDIO command the bring-up sends carries the clock range the bus configuration names,
+    /// not the default.
+    #[test]
+    fn the_bring_up_drives_mdio_at_the_configured_clock_range() {
+        let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
+        let mut account = Account::default();
+        bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();
+        let command = p.register(registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER);
+        assert_eq!(
+            (command >> management_data_io::CLOCK_RANGE_SHIFT)
+                & management_data_io::CLOCK_RANGE_FIELD_MASK,
+            BUS_CONFIGURATION.management_data_io_clock_range.field()
+        );
+        assert_ne!(
+            BUS_CONFIGURATION.management_data_io_clock_range,
+            management_data_io::ClockRange::default()
+        );
     }
 
     /// A probe that measured nothing refuses the bring-up unless the inputs accept it: the

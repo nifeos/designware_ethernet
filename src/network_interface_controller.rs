@@ -8,6 +8,7 @@
 //! against `simulator`'s controller.
 
 use crate::link::{Link, Speed};
+use crate::management_data_io::ClockRange;
 use crate::{BUFFER_BYTES, Hardware, RECEIVE_ENTRIES, TRANSMIT_ENTRIES, layout, registers};
 
 /// Why the controller was not brought up.
@@ -200,13 +201,18 @@ pub struct BusConfiguration {
     pub read_outstanding: u32,
     /// `snps,wr_osr_lmt`.
     pub write_outstanding: u32,
+    /// The CSR clock's rate range, which sets the MDIO clock's divider. Not a DMA setting, but the
+    /// tree states it beside them (as the `stmmaceth` clock's rate, or `snps,clk-csr`).
+    #[doc(alias = "clk_csr")]
+    pub management_data_io_clock_range: ClockRange,
 }
 
 impl BusConfiguration {
     /// Both channels' burst lengths, in beats (`snps,txpbl` and `snps,rxpbl`), with every other
     /// setting off or zero: no fixed burst, no eight-times multiplier, store and forward rather
-    /// than threshold mode, no system bus burst length permitted, and both outstanding request
-    /// limits zero. Set the fields the board's tree states after it.
+    /// than threshold mode, no system bus burst length permitted, both outstanding request limits
+    /// zero, and the default MDIO clock range (the largest divider). Set the fields the board's
+    /// tree states after it.
     pub const fn new(
         transmit_channel_burst_beats: u32,
         receive_channel_burst_beats: u32,
@@ -220,6 +226,7 @@ impl BusConfiguration {
             bus_burst_beats_permitted: 0,
             read_outstanding: 0,
             write_outstanding: 0,
+            management_data_io_clock_range: ClockRange::From500To800Megahertz,
         }
     }
 }
@@ -1029,6 +1036,7 @@ mod tests {
             registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_BURST_32_BEATS_PERMITTED,
         read_outstanding: 0x13,
         write_outstanding: 0x25,
+        management_data_io_clock_range: ClockRange::From20To35Megahertz,
     };
     const THIRTY_TWO_BIT: Identity = Identity {
         version: 0x1052,

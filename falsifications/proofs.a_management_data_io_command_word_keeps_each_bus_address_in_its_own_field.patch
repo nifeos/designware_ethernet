@@ -7,8 +7,8 @@ Expected to fail: the harness's check that the PHY address field equals the PHY 
 diff --git a/src/management_data_io.rs b/src/management_data_io.rs
 --- a/src/management_data_io.rs
 +++ b/src/management_data_io.rs
-@@ -195,7 +195,7 @@
-     (CLOCK_RANGE_500_TO_800_MEGAHERTZ << CLOCK_RANGE_SHIFT)
+@@ -261,7 +261,7 @@
+     ((clock_range.field() & CLOCK_RANGE_FIELD_MASK) << CLOCK_RANGE_SHIFT)
          | (((physical_layer_device_bus_address & 0x1f) as u32)
              << PHYSICAL_LAYER_DEVICE_BUS_ADDRESS_SHIFT)
 -        | (((register & 0x1f) as u32) << REGISTER_BUS_ADDRESS_SHIFT)

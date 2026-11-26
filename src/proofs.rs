@@ -140,15 +140,18 @@ fn a_transmit_descriptor_keeps_its_length_inside_its_fields() {
 /// Falsification: replayable `falsifications/proofs.a_management_data_io_command_word_keeps_each_bus_address_in_its_own_field.patch`
 /// **An MDIO command word holds its two addresses in their own five-bit fields, whatever address
 /// the caller passes.** An address above 31 is reduced and never spills into the neighboring
-/// field, the operation bits say read or write as asked, and the busy bit that starts the command
-/// is set.
+/// field, the clock range field holds the range asked for, whichever it is, the operation bits say
+/// read or write as asked, and the busy bit that starts the command is set.
 ///
 #[kani::proof]
 fn a_management_data_io_command_word_keeps_each_bus_address_in_its_own_field() {
     let device: u8 = kani::any();
     let register: u8 = kani::any();
     let write: bool = kani::any();
-    let word = management_data_io::command_word(device, register, write);
+    let range_index: usize = kani::any();
+    kani::assume(range_index < management_data_io::ClockRange::ALL.len());
+    let clock_range = management_data_io::ClockRange::ALL[range_index];
+    let word = management_data_io::command_word(clock_range, device, register, write);
     assert!(
         (word >> management_data_io::PHYSICAL_LAYER_DEVICE_BUS_ADDRESS_SHIFT) & 0x1f
             == (device & 0x1f) as u32
@@ -157,8 +160,9 @@ fn a_management_data_io_command_word_keeps_each_bus_address_in_its_own_field() {
         (word >> management_data_io::REGISTER_BUS_ADDRESS_SHIFT) & 0x1f == (register & 0x1f) as u32
     );
     assert!(
-        (word >> management_data_io::CLOCK_RANGE_SHIFT) & 0xf
-            == management_data_io::CLOCK_RANGE_500_TO_800_MEGAHERTZ
+        (word >> management_data_io::CLOCK_RANGE_SHIFT)
+            & management_data_io::CLOCK_RANGE_FIELD_MASK
+            == clock_range.field()
     );
     assert!(word & management_data_io::COMMAND_BUSY != 0);
     let operation = word & (0x3 << 2);
