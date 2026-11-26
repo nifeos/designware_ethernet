@@ -1,13 +1,9 @@
 #![cfg_attr(not(test), no_std)]
-//! **The Synopsys `DesignWare` Ethernet `QoS` controller, as pure logic**, with the Motorcomm
-//! `YT8531` physical layer device.
+#![doc = include_str!("../README.md")]
+//! ## Sources
 //!
-//! The crate knows no system-on-chip and reads no device tree. The port's register window, its
-//! bus configuration ([`network_interface_controller::BusConfiguration`]) and the physical layer
-//! device's settings ([`motorcomm_physical_layer_device::Settings`]) come from the caller, in
-//! [`bring_up::Inputs`].
-//!
-//! Everything the driver's two halves compute and nothing either touches. A kernel half brings the
+//! The crate is everything the driver's two halves compute and nothing either touches. A kernel
+//! half brings the
 //! controller and its physical layer device up, measures direct memory access (DMA) coherence
 //! and starts the DMA; a network-stack half fills descriptors and moves the tail pointers. Adapted
 //! from OpenBSD's `dwqe` (`sys/dev/ic/dwqe.c`, `dwqereg.h`, `sys/dev/fdt/if_dwqe_fdt.c`, whose
@@ -73,22 +69,12 @@
 //! ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 //! POSSIBILITY OF SUCH DAMAGE.
 //! ```
-
-//! # BUGS
-//!
-//! - Nothing here has touched the device; every test runs against `simulator`. One receive and one
-//!   transmit queue, polled: no interrupt, offloads, jumbo frames or multicast.
 #[cfg(test)]
 extern crate std;
 
 pub mod bring_up;
 pub mod cache_coherence;
 pub mod link;
-/// The README's example, compiled by `cargo test` so it cannot rot.
-#[cfg(doctest)]
-#[doc = include_str!("../README.md")]
-struct ReadmeExample;
-
 #[doc(alias = "mdio")]
 pub mod management_data_io;
 pub mod motorcomm_physical_layer_device;

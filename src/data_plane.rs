@@ -97,6 +97,49 @@ pub enum TransmitError {
 /// the one just behind [`DataPlane::receive_cursor`], is always held back, so that "the device has
 /// every descriptor" and "the device has none" are never the same tail address; each received frame
 /// reposts it and holds back the slot just consumed.
+///
+/// # Examples
+///
+/// Post the receive ring, queue a frame, and poll. Here the region is ordinary memory and the
+/// tails go nowhere, so nothing answers:
+///
+/// ```
+/// use designware_ethernet::{
+///     DataPlane, DirectMemoryAccessRegion, MAXIMUM_FRAME_BYTES, Tails, layout,
+/// };
+/// # struct Memory(Vec<u8>);
+/// # impl DirectMemoryAccessRegion for Memory {
+/// #     fn read_u64(&self, offset: u64) -> u64 {
+/// #         let mut bytes = [0; 8];
+/// #         self.read_bytes(offset, &mut bytes);
+/// #         u64::from_le_bytes(bytes)
+/// #     }
+/// #     fn write_u64(&mut self, offset: u64, value: u64) {
+/// #         self.write_bytes(offset, &value.to_le_bytes());
+/// #     }
+/// #     fn read_bytes(&self, offset: u64, out: &mut [u8]) {
+/// #         out.copy_from_slice(&self.0[offset as usize..][..out.len()]);
+/// #     }
+/// #     fn write_bytes(&mut self, offset: u64, source: &[u8]) {
+/// #         self.0[offset as usize..][..source.len()].copy_from_slice(source);
+/// #     }
+/// # }
+/// # struct NoDevice;
+/// # impl Tails for NoDevice {
+/// #     fn set_receive_tail(&mut self, _tail_pointer_low_bits: u32) {}
+/// #     fn set_transmit_tail(&mut self, _tail_pointer_low_bits: u32) {}
+/// #     fn barrier(&mut self) {}
+/// # }
+///
+/// let mut region = Memory(vec![0; layout::DIRECT_MEMORY_ACCESS_REGION_BYTES as usize]);
+/// let mut tails = NoDevice;
+/// let mut data_plane = DataPlane::new(0x4000_0000);
+/// data_plane.start(&mut region, &mut tails);
+/// data_plane.transmit(&mut region, &mut tails, &[0xff; 60]).unwrap();
+/// let mut frame = [0; MAXIMUM_FRAME_BYTES];
+/// assert_eq!(data_plane.receive(&mut region, &mut tails, &mut frame), None);
+/// assert_eq!(data_plane.dropped(), 0);
+/// ```
 #[derive(Debug)]
 pub struct DataPlane {
     physical_address: u64,
@@ -249,6 +292,12 @@ impl DataPlane {
     }
 
     /// Queue `frame` for transmission.
+    ///
+    /// # Errors
+    ///
+    /// [`TransmitError::BadLength`] when `frame` is empty or longer than [`MAXIMUM_FRAME_BYTES`],
+    /// and [`TransmitError::Full`] when every transmit descriptor is still the device's; nothing is
+    /// queued either way.
     pub fn transmit(
         &mut self,
         region: &mut impl DirectMemoryAccessRegion,

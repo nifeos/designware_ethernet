@@ -60,6 +60,11 @@ pub(crate) const PROBE_PAYLOAD_SET_BIT_AND_COUNTER_DO_NOT_OVERLAP: () = assert!(
 /// **Steps 1 to 3**: post the receive ring, poison and read back receive buffer 0, queue the
 /// probe frame. The controller must already be configured and started in loopback; the receive
 /// tail write in step 1 and the transmit tail write in step 3 are what set it moving.
+///
+/// # Errors
+///
+/// The [`TransmitError`] [`DataPlane::transmit`] gives for the probe frame, which on a ring
+/// [`DataPlane::start`] has just posted means the transmit ring was not empty.
 pub fn prepare(
     data_plane: &mut DataPlane,
     region: &mut impl DirectMemoryAccessRegion,
@@ -105,7 +110,7 @@ pub struct Observation {
     pub receive_descriptor_word_3: u32,
     /// Transmit descriptor 0's word 3, read by the CPU.
     pub transmit_descriptor_word_3: u32,
-    /// [`registers::CHANNEL_STATUS_REGISTER`], read through MMIO.
+    /// `registers::CHANNEL_STATUS_REGISTER`, read through MMIO.
     pub status: u32,
     /// Receive buffer 0, judged.
     pub payload: Payload,

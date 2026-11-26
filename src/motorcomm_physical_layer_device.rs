@@ -499,6 +499,11 @@ pub(crate) const fn strapped_voltage_millivolts(chip_configuration: u16) -> u32 
 }
 
 /// Read extended register `extended`.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; nothing after it is sent.
 pub fn read_extended(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -516,6 +521,11 @@ pub fn read_extended(
 }
 
 /// Write extended register `extended`.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; nothing after it is sent.
 pub fn write_extended(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -574,6 +584,12 @@ pub struct Applied {
 /// restored at the end, as OpenBSD does, so a firmware access interleaved before or after finds
 /// it where it left it; it is restored when a step fails too, and the step's error is the one
 /// returned.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; the steps after it are not sent, and the
+/// extended-address port is still restored.
 pub fn configure(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -694,6 +710,11 @@ pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_DELAY_AND_DRIVE_FIE
 /// **Set the transmit clock's inversion for the speed just negotiated**, OpenBSD's
 /// `ytphy_yt8521_update`. Returns the new RGMII configuration word. The extended-address port is
 /// saved and restored as [`configure`] does, on failure too.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; the extended-address port is still restored.
 pub fn apply_speed(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -720,6 +741,11 @@ pub fn apply_speed(
 /// **The link, if there is one**, read from the standard clause 22 registers the way OpenBSD's
 /// `ukphy_status` does. The basic mode status register is read twice, because its link bit
 /// latches low.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; nothing after it is sent.
 pub fn read_link(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,

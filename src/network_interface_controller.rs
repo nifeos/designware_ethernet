@@ -36,7 +36,7 @@ pub const RESET_LIMIT_MICROSECONDS: u64 = 300_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Identity {
-    /// [`registers::CORE_VERSION_REGISTER`].
+    /// `registers::CORE_VERSION_REGISTER`.
     pub version: u32,
     /// The four hardware feature registers.
     pub features: [u32; 4],
@@ -91,6 +91,11 @@ const fn queue_bytes(field: u32) -> u32 {
 }
 
 /// **Reset the whole controller** and wait for the reset to finish. Returns how long it took.
+///
+/// # Errors
+///
+/// [`Error::ResetTimeout`] when the reset bit has not cleared within the reset limit, usually
+/// because the physical layer device's receive clock is missing.
 pub fn soft_reset(hardware: &mut impl Hardware) -> Result<u64, Error> {
     let mode = hardware.read(registers::DIRECT_MEMORY_ACCESS_BUS_MODE_REGISTER);
     hardware.write(
@@ -430,6 +435,43 @@ fn program_descriptor_rings(hardware: &mut impl Hardware, region: u64) {
 /// says `rx-fifo-depth = <262144>` and mainline says `<2048>` for the same silicon, and a queue
 /// size computed from the first would overflow the field into the next. The hardware's statement
 /// is the one fact about the queue memory both trees are describing.
+///
+/// # Errors
+///
+/// [`Error::RegionOutOfReach`] when `region_physical_address` is past the controller's address
+/// width or the region straddles a 4 GiB boundary; no register is written then.
+///
+/// # Examples
+///
+/// The bring-up calls this between its resets; a caller driving the controller itself does the
+/// same. Here a stand-in controller reads every register as zero, which states a 32-bit DMA:
+///
+/// ```
+/// use designware_ethernet::network_interface_controller::{
+///     BusConfiguration, Error, Identity, configure,
+/// };
+/// use designware_ethernet::{Hardware, StationMacAddress};
+///
+/// struct Zeroes;
+/// impl Hardware for Zeroes {
+///     fn read(&mut self, _offset: u32) -> u32 {
+///         0
+///     }
+///     fn write(&mut self, _offset: u32, _value: u32) {}
+///     fn delay_microseconds(&mut self, _microseconds: u64) {}
+/// }
+///
+/// let mut hardware = Zeroes;
+/// let id = Identity::read(&mut hardware);
+/// let station = StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).unwrap();
+/// let bus = BusConfiguration::new(16, 16);
+/// configure(&mut hardware, &id, &bus, 0x4000_0000, station).unwrap();
+/// // A region that straddles 4 GiB is refused before any register is written.
+/// assert!(matches!(
+///     configure(&mut hardware, &id, &bus, 0xffff_f000, station),
+///     Err(Error::RegionOutOfReach { .. })
+/// ));
+/// ```
 pub fn configure(
     hardware: &mut impl Hardware,
     id: &Identity,
@@ -638,6 +680,12 @@ const TRANSMIT_FLUSH_LIMIT_MICROSECONDS: u32 = 10_000;
 
 /// **Stop the MAC and both DMA channels**, OpenBSD's `dwqe_down` order: receiver off, receive DMA
 /// off, transmit DMA off, flush the transmit queue, transmitter off.
+///
+/// # Errors
+///
+/// [`Error::FlushTimeout`] when the transmit queue has not finished flushing within the flush
+/// limit; the receiver and both DMA channels are already off, and the transmitter is turned off
+/// regardless.
 pub fn stop(hardware: &mut impl Hardware) -> Result<(), Error> {
     let configuration = hardware.read(registers::MAC_CONFIGURATION_REGISTER);
     hardware.write(

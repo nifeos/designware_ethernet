@@ -238,7 +238,7 @@ pub(crate) const PHYSICAL_LAYER_DEVICE_ID_2_REGISTER: u8 = 0x03;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
-    /// The busy bit stayed set for [`COMMAND_LIMIT_MICROSECONDS`]: the MAC's CSR clock is off, or the
+    /// The busy bit stayed set for `COMMAND_LIMIT_MICROSECONDS`: the MAC's CSR clock is off, or the
     /// command never started.
     Timeout {
         /// The physical layer device addressed, by its bus address.
@@ -308,8 +308,16 @@ pub(crate) const COMMAND_WORD_FIELDS_DO_NOT_OVERLAP: () = assert!(
 #[doc(alias = "mdio")]
 pub trait ManagementDataIo {
     /// Read register `register` of the physical layer device at `physical_layer_device_bus_address`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Timeout`] when the transaction does not complete.
     fn read(&mut self, physical_layer_device_bus_address: u8, register: u8) -> Result<u16, Error>;
     /// Write `value` to register `register` of the physical layer device at `physical_layer_device_bus_address`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Timeout`] when the transaction does not complete.
     fn write(
         &mut self,
         physical_layer_device_bus_address: u8,
@@ -410,6 +418,10 @@ impl<H: Hardware> ManagementDataIo for Bus<'_, H> {
 
 /// **The physical layer device's identifier**, `PHYSICAL_LAYER_DEVICE_ID_1_REGISTER << 16 | PHYSICAL_LAYER_DEVICE_ID_2_REGISTER`, revision included. It returns the
 /// identifier; `physical_layer_device_bus_address` is the bus address of the device to ask.
+///
+/// # Errors
+///
+/// [`Error::Timeout`] when either identifier read does not complete.
 #[doc(alias = "phy")]
 pub fn physical_layer_device_id(
     bus: &mut impl ManagementDataIo,
@@ -435,6 +447,10 @@ pub(crate) const PHYSICAL_LAYER_DEVICE_ID_HALVES_DO_NOT_OVERLAP: () =
 
 /// **Is the link up right now?** Two reads of the latched-low status bit, so a drop since the last
 /// look does not read as down forever and a link that is up now reads as up.
+///
+/// # Errors
+///
+/// [`Error::Timeout`] when either status read does not complete.
 pub fn is_link_up(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -452,6 +468,11 @@ pub fn is_link_up(
 
 /// **Restart autonegotiation**, advertising whatever the physical layer device's own defaults advertise (every speed
 /// on a gigabit part).
+///
+/// # Errors
+///
+/// [`Error::Timeout`] when the control register's read or write does not complete; after a failed
+/// read nothing is written.
 pub fn restart_autonegotiation(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,

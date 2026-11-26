@@ -2,7 +2,7 @@
 //! driver writes or reads.
 //!
 //! Transcribed from OpenBSD's `sys/dev/ic/dwqereg.h` (revision of 2026-07-31, commit
-//! `59ec3ab4d107`, ISC license, notice in the crate root), with [`MAC_CONFIGURATION_LOOPBACK_MODE`] from Linux's
+//! `59ec3ab4d107`, ISC license, notice in the crate root), with `MAC_CONFIGURATION_LOOPBACK_MODE` from Linux's
 //! `stmmac/dwmac4.h` and `CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_SHIFT` from U-Boot's `dwc_eth_qos.h`. The media
 //! access control (MAC) and transaction layer are page `0x0000`; page `0x1000` holds the DMA channel's tail pointers beside its ring
 //! bases and the controller's software reset, and there is no input-output memory management unit (IOMMU), so a process given that page

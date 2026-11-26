@@ -210,6 +210,47 @@ pub struct BroughtUp {
 /// # Errors
 ///
 /// The first [`Error`] the sequence meets; `account` holds what it saw until then.
+///
+/// # Examples
+///
+/// A caller's [`Port`] reaches the window, the DMA region and a clock; the board's tree supplies
+/// the rest. This board takes its station address from the tree and its delays from the vendor
+/// tree's register values:
+///
+/// ```no_run
+/// use designware_ethernet::StationMacAddress;
+/// use designware_ethernet::bring_up::{
+///     Account, Error, Inputs, Port, bring_up_with_motorcomm_yt8531,
+/// };
+/// use designware_ethernet::management_data_io::ClockRange;
+/// use designware_ethernet::motorcomm_physical_layer_device::{
+///     PadDriveStrength, Settings, SettingsSource,
+/// };
+/// use designware_ethernet::network_interface_controller::BusConfiguration;
+///
+/// fn start_port(port: &mut impl Port, region_physical_address: u64) -> Result<(), Error> {
+///     let mut bus = BusConfiguration::new(16, 16);
+///     bus.fixed_burst = true;
+///     bus.management_data_io_clock_range = ClockRange::From250To300Megahertz;
+///     let settings = Settings::new(
+///         0xa,
+///         false,
+///         0xa,
+///         PadDriveStrength::Code(6),
+///         PadDriveStrength::Code(3),
+///         [true, true, true],
+///         SettingsSource::VendorTree,
+///     );
+///     let mut inputs = Inputs::new(region_physical_address, bus, 0, settings);
+///     inputs.station_mac_address = StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]);
+///     let mut account = Account::default();
+///     let brought_up = bring_up_with_motorcomm_yt8531(port, &inputs, &mut account)?;
+///     if brought_up.link.is_none() {
+///         // No cable: the rings are programmed and the controller waits to be started.
+///     }
+///     Ok(())
+/// }
+/// ```
 pub fn bring_up_with_motorcomm_yt8531(
     port: &mut impl Port,
     inputs: &Inputs,
