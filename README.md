@@ -85,8 +85,8 @@ Six Kani harnesses, in `src/proofs.rs`:
   last segment, and the length fits its two fields without reaching a flag bit.
 - `a_management_data_io_command_word_keeps_each_bus_address_in_its_own_field`: for every physical
   layer device and register address and every MDIO clock range, the command word holds each
-  address in its own five-bit field and the range in its own, says read or write as asked and sets
-  the busy bit.
+  address in its own five-bit field and the range in its own. It says read or write as asked and
+  sets the busy bit.
 - `a_coherent_verdict_needs_every_account_to_agree`: for every observation, a fatal bus error gives
   the bus error verdict, and the coherent verdict needs the receive descriptor handed back, the
   payload to match the probe frame and the delivered length to be the probe's.

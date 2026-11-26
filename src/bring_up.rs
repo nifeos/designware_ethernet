@@ -9,7 +9,7 @@
 //! the caller hands over in [`Inputs`].
 //!
 //! The one bring-up here, [`bring_up_with_motorcomm_yt8531`], serves a board whose physical layer
-//! device is a Motorcomm YT8531 and refuses any other. A board with another device drives the
+//! device is a Motorcomm `YT8531` and refuses any other. A board with another device drives the
 //! controller with the module functions this one calls; a bring-up that takes any physical layer
 //! device can follow as an addition.
 
@@ -201,7 +201,7 @@ pub struct BroughtUp {
     pub link: Option<Link>,
 }
 
-/// **Bring the port up with a Motorcomm YT8531 physical layer device**, recording into `account`
+/// **Bring the port up with a Motorcomm `YT8531` physical layer device**, recording into `account`
 /// as it goes. A device with any other identifier is refused with
 /// [`Error::UnknownPhysicalLayerDevice`]. On success the controller runs at
 /// the link's speed with both rings programmed and empty, and the answer is the station address
@@ -213,41 +213,26 @@ pub struct BroughtUp {
 ///
 /// # Examples
 ///
-/// A caller's [`Port`] reaches the window, the DMA region and a clock; the board's tree supplies
-/// the rest. This board takes its station address from the tree and its delays from the vendor
-/// tree's register values:
+/// A caller's [`Port`] reaches the window, the DMA region and a clock; the board's device tree
+/// supplies the rest, here the vendor tree's delay values and a station address:
 ///
 /// ```no_run
-/// use designware_ethernet::StationMacAddress;
-/// use designware_ethernet::bring_up::{
-///     Account, Error, Inputs, Port, bring_up_with_motorcomm_yt8531,
-/// };
+/// use designware_ethernet::bring_up::{Account, Error, Inputs, Port};
 /// use designware_ethernet::management_data_io::ClockRange;
-/// use designware_ethernet::motorcomm_physical_layer_device::{
-///     PadDriveStrength, Settings, SettingsSource,
-/// };
+/// use designware_ethernet::motorcomm_physical_layer_device::{PadDriveStrength, Settings, SettingsSource};
 /// use designware_ethernet::network_interface_controller::BusConfiguration;
+/// use designware_ethernet::{StationMacAddress, bring_up::bring_up_with_motorcomm_yt8531};
 ///
 /// fn start_port(port: &mut impl Port, region_physical_address: u64) -> Result<(), Error> {
 ///     let mut bus = BusConfiguration::new(16, 16);
-///     bus.fixed_burst = true;
 ///     bus.management_data_io_clock_range = ClockRange::From250To300Megahertz;
-///     let settings = Settings::new(
-///         0xa,
-///         false,
-///         0xa,
-///         PadDriveStrength::Code(6),
-///         PadDriveStrength::Code(3),
-///         [true, true, true],
-///         SettingsSource::VendorTree,
-///     );
+///     let drive = (PadDriveStrength::Code(6), PadDriveStrength::Code(3));
+///     let settings = Settings::new(0xa, false, 0xa, drive.0, drive.1, [true; 3], SettingsSource::VendorTree);
 ///     let mut inputs = Inputs::new(region_physical_address, bus, 0, settings);
 ///     inputs.station_mac_address = StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]);
-///     let mut account = Account::default();
-///     let brought_up = bring_up_with_motorcomm_yt8531(port, &inputs, &mut account)?;
-///     if brought_up.link.is_none() {
-///         // No cable: the rings are programmed and the controller waits to be started.
-///     }
+///     let brought_up = bring_up_with_motorcomm_yt8531(port, &inputs, &mut Account::default())?;
+///     // With no link (no cable), the rings are programmed and the controller is not started.
+///     let _ = brought_up.link;
 ///     Ok(())
 /// }
 /// ```
@@ -659,7 +644,7 @@ mod tests {
     /// Every MDIO command the bring-up sends carries the clock range the bus configuration names,
     /// not the default.
     #[test]
-    fn the_bring_up_drives_mdio_at_the_configured_clock_range() {
+    fn the_bring_up_drives_management_data_io_at_the_configured_clock_range() {
         let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
         let mut account = Account::default();
         bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();

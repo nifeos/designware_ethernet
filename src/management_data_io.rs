@@ -95,6 +95,7 @@ impl ClockRange {
 
 /// **The clock range field's mask**, four bits at [`CLOCK_RANGE_SHIFT`] (`GMAC_MAC_MDIO_ADDR_CR_MASK`,
 /// `dwqereg.h`, after the shift).
+#[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_MASK")]
 pub(crate) const CLOCK_RANGE_FIELD_MASK: u32 = 0xf;
 /// **MDIO physical layer device address shift** (`GMAC_MAC_MDIO_ADDR_PA_SHIFT`, `dwqereg.h`).
 #[doc(alias = "GMAC_MAC_MDIO_ADDR_PA_SHIFT")]

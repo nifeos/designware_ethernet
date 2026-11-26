@@ -109,28 +109,17 @@ pub enum TransmitError {
 /// };
 /// # struct Memory(Vec<u8>);
 /// # impl DirectMemoryAccessRegion for Memory {
-/// #     fn read_u64(&self, offset: u64) -> u64 {
-/// #         let mut bytes = [0; 8];
-/// #         self.read_bytes(offset, &mut bytes);
-/// #         u64::from_le_bytes(bytes)
-/// #     }
-/// #     fn write_u64(&mut self, offset: u64, value: u64) {
-/// #         self.write_bytes(offset, &value.to_le_bytes());
-/// #     }
-/// #     fn read_bytes(&self, offset: u64, out: &mut [u8]) {
-/// #         out.copy_from_slice(&self.0[offset as usize..][..out.len()]);
-/// #     }
-/// #     fn write_bytes(&mut self, offset: u64, source: &[u8]) {
-/// #         self.0[offset as usize..][..source.len()].copy_from_slice(source);
-/// #     }
+/// #     fn read_u64(&self, at: u64) -> u64 { let mut b = [0; 8]; self.read_bytes(at, &mut b); u64::from_le_bytes(b) }
+/// #     fn write_u64(&mut self, at: u64, value: u64) { self.write_bytes(at, &value.to_le_bytes()) }
+/// #     fn read_bytes(&self, at: u64, out: &mut [u8]) { out.copy_from_slice(&self.0[at as usize..][..out.len()]) }
+/// #     fn write_bytes(&mut self, at: u64, from: &[u8]) { self.0[at as usize..][..from.len()].copy_from_slice(from) }
 /// # }
 /// # struct NoDevice;
 /// # impl Tails for NoDevice {
-/// #     fn set_receive_tail(&mut self, _tail_pointer_low_bits: u32) {}
-/// #     fn set_transmit_tail(&mut self, _tail_pointer_low_bits: u32) {}
+/// #     fn set_receive_tail(&mut self, _: u32) {}
+/// #     fn set_transmit_tail(&mut self, _: u32) {}
 /// #     fn barrier(&mut self) {}
 /// # }
-///
 /// let mut region = Memory(vec![0; layout::DIRECT_MEMORY_ACCESS_REGION_BYTES as usize]);
 /// let mut tails = NoDevice;
 /// let mut data_plane = DataPlane::new(0x4000_0000);

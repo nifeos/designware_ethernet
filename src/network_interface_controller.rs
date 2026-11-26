@@ -148,8 +148,8 @@ impl StationMacAddress {
 }
 
 impl From<StationMacAddress> for [u8; 6] {
-    fn from(address: StationMacAddress) -> [u8; 6] {
-        address.0
+    fn from(station: StationMacAddress) -> [u8; 6] {
+        station.0
     }
 }
 
@@ -443,30 +443,23 @@ fn program_descriptor_rings(hardware: &mut impl Hardware, region: u64) {
 ///
 /// # Examples
 ///
-/// The bring-up calls this between its resets; a caller driving the controller itself does the
-/// same. Here a stand-in controller reads every register as zero, which states a 32-bit DMA:
+/// A stand-in controller reads every register as zero, which states a 32-bit DMA, so a region
+/// that straddles 4 GiB is refused:
 ///
 /// ```
-/// use designware_ethernet::network_interface_controller::{
-///     BusConfiguration, Error, Identity, configure,
-/// };
+/// use designware_ethernet::network_interface_controller::{BusConfiguration, Error, Identity, configure};
 /// use designware_ethernet::{Hardware, StationMacAddress};
-///
 /// struct Zeroes;
 /// impl Hardware for Zeroes {
-///     fn read(&mut self, _offset: u32) -> u32 {
-///         0
-///     }
+///     fn read(&mut self, _offset: u32) -> u32 { 0 }
 ///     fn write(&mut self, _offset: u32, _value: u32) {}
 ///     fn delay_microseconds(&mut self, _microseconds: u64) {}
 /// }
-///
 /// let mut hardware = Zeroes;
 /// let id = Identity::read(&mut hardware);
 /// let station = StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).unwrap();
 /// let bus = BusConfiguration::new(16, 16);
 /// configure(&mut hardware, &id, &bus, 0x4000_0000, station).unwrap();
-/// // A region that straddles 4 GiB is refused before any register is written.
 /// assert!(matches!(
 ///     configure(&mut hardware, &id, &bus, 0xffff_f000, station),
 ///     Err(Error::RegionOutOfReach { .. })
