@@ -378,6 +378,8 @@ pub(crate) struct NetworkInterfaceController {
     barriers: usize,
     /// The microseconds every delay so far has asked for: the simulation's clock.
     clock_microseconds: u64,
+    /// A step back the clock takes at one reading: how many readings until it, and how far.
+    clock_step_back: Option<(u32, u64)>,
     /// The microseconds and the number of delays asked for since the controller was made, which
     /// [`DELAY_BOUND_MICROSECONDS`] and [`DELAY_BOUND_CALLS`] bound.
     delayed: (u64, u64),
@@ -413,6 +415,7 @@ impl NetworkInterfaceController {
             wire: Vec::new(),
             barriers: 0,
             clock_microseconds: 0,
+            clock_step_back: None,
             delayed: (0, 0),
         };
         network_interface_controller.reset_registers();
@@ -462,6 +465,12 @@ impl NetworkInterfaceController {
     #[cfg(test)]
     pub(crate) fn set_clock_microseconds(&mut self, microseconds: u64) {
         self.clock_microseconds = microseconds;
+    }
+    /// After `readings` more readings, the clock steps back `microseconds`, as a caller's clock
+    /// that is not monotonic might, so a test can show no wait trusts it.
+    #[cfg(test)]
+    pub(crate) fn step_clock_back(&mut self, readings: u32, microseconds: u64) {
+        self.clock_step_back = Some((readings, microseconds));
     }
     /// A register's current value.
     pub(crate) fn register(&self, offset: u32) -> u32 {
@@ -776,6 +785,14 @@ impl crate::bring_up::Port for NetworkInterfaceController {
         self.with(f)
     }
     fn now_microseconds(&mut self) -> u64 {
+        if let Some((readings, microseconds)) = self.clock_step_back {
+            if readings == 0 {
+                self.clock_microseconds -= microseconds;
+                self.clock_step_back = None;
+            } else {
+                self.clock_step_back = Some((readings - 1, microseconds));
+            }
+        }
         self.clock_microseconds
     }
 }

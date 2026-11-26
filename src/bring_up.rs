@@ -46,8 +46,8 @@ pub trait Port: Hardware {
         &mut self,
         f: impl FnOnce(&mut Self::Region<'_>, &mut Self::Tails<'_>) -> R,
     ) -> R;
-    /// A monotonic clock, in microseconds. It never goes backwards: the bring-up subtracts an
-    /// earlier reading from a later one.
+    /// A monotonic clock, in microseconds. It should never go backwards; if it does, the bring-up
+    /// reads the step back as no time passed, so a wait runs longer and never ends early.
     fn now_microseconds(&mut self) -> u64;
 }
 
@@ -266,12 +266,12 @@ fn wait_for_link(
         {
             break Some(l);
         }
-        if port.now_microseconds() - started >= LINK_WAIT_MILLISECONDS * 1000 {
+        if port.now_microseconds().saturating_sub(started) >= LINK_WAIT_MILLISECONDS * 1000 {
             break None;
         }
         port.delay_microseconds(LINK_POLL_MICROSECONDS);
     };
-    account.link_wait_milliseconds = (port.now_microseconds() - started) / 1000;
+    account.link_wait_milliseconds = port.now_microseconds().saturating_sub(started) / 1000;
     account.link = link;
     if let Some(l) = link {
         motorcomm_physical_layer_device::apply_speed(
@@ -311,7 +311,7 @@ fn probe(
     let _ = port.with_region(|r, t| cache_coherence::prepare(&mut data_plane, r, t, station));
     let started = port.now_microseconds();
     while !port.with_region(|r, _| cache_coherence::is_delivered(r))
-        && port.now_microseconds() - started < cache_coherence::WAIT_MICROSECONDS
+        && port.now_microseconds().saturating_sub(started) < cache_coherence::WAIT_MICROSECONDS
     {
         port.delay_microseconds(1);
     }
@@ -565,5 +565,29 @@ mod tests {
             account.link_wait_milliseconds
                 <= LINK_WAIT_MILLISECONDS + LINK_POLL_MICROSECONDS / 1000
         );
+    }
+
+    /// A clock that steps back reads as no time passed, never as a wrapped elapsed time: the probe
+    /// still sees its frame, and a link that never comes still costs the whole bound rather than
+    /// ending the wait at once (or panicking in a debug build).
+    #[test]
+    fn a_clock_that_steps_back_never_ends_a_wait_early() {
+        for readings in 0..4 {
+            let mut p = port(Memory::coherent(REGION), None);
+            p.set_clock_microseconds(1 << 20);
+            p.step_clock_back(readings, 1000);
+            let mut account = Account::default();
+            assert_eq!(
+                bring_up(&mut p, &inputs(), &mut account),
+                Ok((STATION, None)),
+                "a step back at reading {readings}"
+            );
+            assert!(matches!(account.coherence, Some((Verdict::Coherent, _))));
+            assert!(
+                account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS - 1,
+                "a step back at reading {readings}: {}",
+                account.link_wait_milliseconds
+            );
+        }
     }
 }
