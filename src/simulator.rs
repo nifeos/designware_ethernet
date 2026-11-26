@@ -378,7 +378,18 @@ pub(crate) struct NetworkInterfaceController {
     barriers: usize,
     /// The microseconds every delay so far has asked for: the simulation's clock.
     clock_microseconds: u64,
+    /// The microseconds and the number of delays asked for since the controller was made, which
+    /// [`DELAY_BOUND_MICROSECONDS`] and [`DELAY_BOUND_CALLS`] bound.
+    delayed: (u64, u64),
 }
+
+/// More simulated time than any wait in the crate takes, the link wait's five seconds included:
+/// a poll loop that runs past it never ends, and the simulator says so rather than hanging the
+/// test.
+const DELAY_BOUND_MICROSECONDS: u64 = 60_000_000;
+/// More delays than any wait in the crate asks for, the probe's one-microsecond polls included,
+/// for a loop whose delays are too short to reach [`DELAY_BOUND_MICROSECONDS`] quickly.
+const DELAY_BOUND_CALLS: u64 = 1_000_000;
 
 const VERSION: u32 = 0x1052;
 /// 40-bit addressing, 2 KiB queue memories each way.
@@ -402,6 +413,7 @@ impl NetworkInterfaceController {
             wire: Vec::new(),
             barriers: 0,
             clock_microseconds: 0,
+            delayed: (0, 0),
         };
         network_interface_controller.reset_registers();
         network_interface_controller
@@ -745,6 +757,14 @@ impl Hardware for NetworkInterfaceController {
 
     fn delay_microseconds(&mut self, microseconds: u64) {
         self.clock_microseconds += microseconds.max(1);
+        self.delayed.0 += microseconds.max(1);
+        self.delayed.1 += 1;
+        assert!(
+            self.delayed.0 <= DELAY_BOUND_MICROSECONDS && self.delayed.1 <= DELAY_BOUND_CALLS,
+            "a wait never ended: {} microseconds over {} delays",
+            self.delayed.0,
+            self.delayed.1
+        );
         self.step();
     }
 }

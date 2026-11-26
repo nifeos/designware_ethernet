@@ -573,6 +573,10 @@ mod tests {
             [0x1_0000, 0x10]
         );
         assert_eq!(
+            RECEIVE_QUEUE_CONTROL_0_DATA_CENTER_BRIDGING_QUEUE_ENABLE,
+            0x2
+        );
+        assert_eq!(
             [
                 CHANNEL_STATUS_TRANSMIT_PROCESS_STOPPED,
                 CHANNEL_STATUS_TRANSMIT_BUFFER_UNAVAILABLE,

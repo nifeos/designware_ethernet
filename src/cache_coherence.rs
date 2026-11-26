@@ -48,7 +48,7 @@ pub fn probe_frame(station_mac_address: [u8; 6]) -> [u8; PROBE_FRAME_BYTES] {
 }
 
 /// The probe payload byte's set bit and its six-bit counter share no bit, so the byte is 0x40 to
-/// 0x7f under `|` and under `^` alike, which the compiler checks here; the mutation exclusion for
+/// 0x7f under `|` and under `^` alike, which the compiler checks here; the mutation exemption for
 /// `probe_frame` names this constant. A compile-time gate, not a runtime check: it must fail the
 /// build if the two ever share a bit. The clippy lints read any constant assertion as a runtime
 /// suspicion and fold it; that is what a gate is, allowed here for exactly that reason.

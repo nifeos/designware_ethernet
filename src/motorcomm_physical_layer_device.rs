@@ -126,7 +126,7 @@ pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_RECEIVE_CLOCK_DRIVE
 pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_RECEIVE_DATA_DRIVE_STRENGTH_MASK: u16 =
     (1 << 12) | (0x3 << 4);
 /// The mask's two fields share no bit, so its `|` is its `^`, which the compiler checks here; the
-/// exclusion of the mask's or-versus-xor mutant names this constant. The clippy lints fold the
+/// exemption of the mask's or-versus-xor mutant names this constant. The clippy lints fold the
 /// literals; that is what a gate is, allowed here for exactly that reason.
 #[allow(clippy::assertions_on_constants, clippy::eq_op)]
 #[allow(dead_code)]
@@ -216,7 +216,7 @@ pub(crate) const fn link_from_registers(
 }
 
 /// The 100BASE-T4 and `100BASE-TX` partner abilities share no bit, so the one `|` in
-/// `link_from_registers` is its `^`, which the compiler checks here; the mutation exclusion for
+/// `link_from_registers` is its `^`, which the compiler checks here; the mutation exemption for
 /// `link_from_registers` names this constant.
 #[allow(dead_code)]
 pub(crate) const PARTNER_HUNDRED_MEGABIT_ABILITIES_DO_NOT_OVERLAP: () = assert!(
@@ -388,6 +388,36 @@ impl Settings {
     }
 }
 
+/// The fields [`Settings::to_word`] composes share no bit, each at the width the function itself
+/// bounds it to (not the width a caller happens to pass): each delay select is refused above
+/// `0xf`, each flag is one bit, the source is 0 to 2, and each drive is 25 bits, a code below 256
+/// or microamps below `1 << 24` shifted past its tag bit. Fields share no bit exactly when their
+/// sum is their `|`. The compiler checks it here, and the mutation exemptions for `to_word` name
+/// this constant.
+// The fields are written out inside the assertion, where no mutant reaches them, and clippy
+// folds the literals and calls the comparison constant, which is the point of it.
+#[allow(dead_code, clippy::eq_op, clippy::assertions_on_constants)]
+pub(crate) const SETTINGS_WORD_FIELDS_DO_NOT_OVERLAP: () = assert!(
+    0xf_u64
+        + (1 << 4)
+        + (0xf << 5)
+        + (1 << 9)
+        + (1 << 10)
+        + (1 << 11)
+        + (0x3 << 12)
+        + (((1 << 25) - 1) << 14)
+        + (((1 << 25) - 1) << 39)
+        == 0xf_u64
+            | (1 << 4)
+            | (0xf << 5)
+            | (1 << 9)
+            | (1 << 10)
+            | (1 << 11)
+            | (0x3 << 12)
+            | (((1 << 25) - 1) << 14)
+            | (((1 << 25) - 1) << 39)
+);
+
 /// **The pad drive code for a current at a voltage**, OpenBSD's `ytphy_yt8531_ds_map`, or `None`
 /// for a pair the table has no code for, which includes everything at 2.5 V. OpenBSD writes the
 /// part's default of 3 for such a pair and goes on, and so does [`configure`], which says so in
@@ -473,6 +503,9 @@ fn modify_extended(
     clear: u16,
     set: u16,
 ) -> Result<u16, management_data_io::Error> {
+    // Every caller sets bits only inside the field it clears, so the `|` below adds to bits the
+    // `& !clear` just emptied; the mutation exemption for this line rests on this assertion.
+    debug_assert!(set & !clear == 0, "a set bit outside the cleared field");
     let value = (read_extended(bus, physical_layer_device_bus_address, extended)? & !clear) | set;
     write_extended(bus, physical_layer_device_bus_address, extended, value)?;
     Ok(value)
@@ -609,7 +642,7 @@ fn configure_extended_registers(
 
 /// The delay and drive fields the two words compose share no bit, and the transmit delay select
 /// is zero: every `|` here is its `^`, and a shift by `TRANSMIT_DELAY_SELECT_SHIFT` is the identity; the
-/// compiler checks both here, and the mutation exclusions for `configure` name this constant.
+/// compiler checks both here, and the mutation exemptions for `configure` name this constant.
 #[allow(dead_code)]
 pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_DELAY_AND_DRIVE_FIELDS_DO_NOT_OVERLAP: () = assert!(
     (0xf << RECEIVE_DELAY_SELECT_SHIFT) & (0xf << TRANSMIT_DELAY_SELECT_SHIFT) == 0

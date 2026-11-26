@@ -256,6 +256,33 @@ fn a_full_transmit_ring_refuses_rather_than_overwriting_an_owned_descriptor() {
     );
 }
 
+/// Reclaiming moves the clean cursor one slot per sent frame, so after a sent frame is taken back
+/// the ring again holds exactly one fewer frame than it has descriptors, and says it is full at
+/// that count and not one later.
+#[test]
+fn after_a_reclaim_the_ring_is_full_at_one_fewer_than_its_descriptors() {
+    let mut network_interface_controller =
+        NetworkInterfaceController::new(PHYSICAL_ADDRESS, Memory::coherent(PHYSICAL_ADDRESS));
+    network_interface_controller.program_rings_and_start(PHYSICAL_ADDRESS);
+    let mut data_plane = DataPlane::new(PHYSICAL_ADDRESS);
+    network_interface_controller.with(|r, t| data_plane.start(r, t));
+    network_interface_controller
+        .with(|r, t| data_plane.transmit(r, t, &frame(60, 0)))
+        .unwrap();
+    network_interface_controller.step();
+    assert_eq!(network_interface_controller.wire_out().len(), 1);
+    for k in 1..usize::from(TRANSMIT_ENTRIES) {
+        network_interface_controller
+            .with(|r, t| data_plane.transmit(r, t, &frame(60, k as u8)))
+            .unwrap();
+    }
+    assert!(!network_interface_controller.with(|r, _| data_plane.can_transmit(r)));
+    assert_eq!(
+        network_interface_controller.with(|r, t| data_plane.transmit(r, t, &frame(60, 0))),
+        Err(TransmitError::Full)
+    );
+}
+
 #[test]
 fn a_frame_of_no_length_or_too_much_is_refused() {
     let mut network_interface_controller =

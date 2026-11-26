@@ -121,7 +121,7 @@ pub(crate) const fn receive_descriptor_words(buffer_physical_address: u64) -> [u
 }
 
 /// The three bits the receive word sets are distinct single bits, so the `|`s are their `^`s,
-/// which the compiler checks here; the mutation exclusion for `receive_descriptor_words` names
+/// which the compiler checks here; the mutation exemption for `receive_descriptor_words` names
 /// this constant. The compiler is the gate's only reader, and it reads at const evaluation, so
 /// `dead_code` is allowed here for exactly that reason.
 #[allow(dead_code)]
@@ -157,7 +157,7 @@ pub(crate) const fn transmit_descriptor_words(
 /// Word 2's length field and interrupt bit share no bit; word 3's three set bits are distinct
 /// single bits and none of them reaches the length field; and word 2 sits a whole word below the
 /// shifted word 3, for every value either can hold. The compiler checks it here, and the
-/// mutation exclusion for `transmit_descriptor_words` names this constant. The compiler is the
+/// mutation exemption for `transmit_descriptor_words` names this constant. The compiler is the
 /// gate's only reader, and it reads at const evaluation, so `dead_code` is allowed here for
 /// exactly that reason.
 #[allow(dead_code)]
@@ -229,7 +229,7 @@ pub(crate) fn receive_verdict(descriptor_word_3: u32, room: usize) -> ReceiveVer
 }
 
 /// First and last are distinct single bits, so the mask and the compared value read the same
-/// under `|` and under `^`, which the compiler checks here; the mutation exclusion for
+/// under `|` and under `^`, which the compiler checks here; the mutation exemption for
 /// `receive_verdict` names this constant. The compiler is the gate's only reader, and it reads at
 /// const evaluation, so `dead_code` is allowed here for exactly that reason.
 #[allow(dead_code)]

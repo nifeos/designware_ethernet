@@ -200,7 +200,7 @@ pub(crate) fn receive_queue_mode(current: u32, bus: &BusConfiguration, queue_byt
 
 /// The fields this word composes share no bit, so every `|` here is its `^`: store-and-forward
 /// against the threshold field, and the two flow-control threshold fields against each other;
-/// the compiler checks it here, and the mutation exclusion for `receive_queue_mode` names this
+/// the compiler checks it here, and the mutation exemption for `receive_queue_mode` names this
 /// constant. Clippy's `eq_op` lint folds the second conjunct's literals to `0 == 0`; that is
 /// what a gate is, allowed here for exactly that reason.
 #[allow(clippy::eq_op)]
@@ -234,7 +234,7 @@ pub(crate) fn transmit_queue_mode(current: u32, bus: &BusConfiguration, queue_by
 }
 
 /// Store-and-forward and the threshold field share no bit, so the one `|` here is its `^`, which
-/// the compiler checks here; the mutation exclusion for `transmit_queue_mode` names this
+/// the compiler checks here; the mutation exemption for `transmit_queue_mode` names this
 /// constant.
 #[allow(dead_code)]
 pub(crate) const TRANSMIT_QUEUE_MODE_FIELDS_DO_NOT_OVERLAP: () = assert!(
@@ -444,13 +444,14 @@ pub fn configure(
 }
 
 /// The register fields configure composes share no bit: the outstanding-limit masks against each
-/// other and against the burst-length bits (which is what `bus_burst_beats_permitted` carries), the
-/// transmit and receive burst-length fields against the bits set beside them, the receive buffer
-/// size against the receive burst-length field, and the pause time against the flow-control
-/// enable; the compiler checks it here, and the mutation exclusion for `configure` and the triage
-/// rows for `program_system_bus_mode` and `program_channel_bursts` name this constant. A field
-/// value reaches its `|` through its own mask, and a word whose field the line above cleared takes
-/// a value only inside that field; where neither holds, the configure tests kill the swap.
+/// other and against the burst-length bits, the transmit and receive burst-length fields against
+/// the bits set beside them, the receive buffer size against the receive burst-length field (and
+/// the size written inside its own field), and the pause time against the flow-control enable;
+/// the compiler checks it here, and the mutation exemptions for `configure`,
+/// `program_system_bus_mode` and `program_channel_bursts` name this constant. A field value
+/// reaches its `|` through its own mask, and a word whose field the line above cleared takes a
+/// value only inside that field. `bus_burst_beats_permitted` is neither: it is a public field the
+/// caller fills, so nothing here bounds it, and a test kills the swap of its `|`.
 #[allow(dead_code)]
 pub(crate) const CONFIGURED_BUS_FIELDS_DO_NOT_OVERLAP: () = assert!(
     registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_READ_OUTSTANDING_REQUEST_LIMIT_MASK
@@ -473,6 +474,10 @@ pub(crate) const CONFIGURED_BUS_FIELDS_DO_NOT_OVERLAP: () = assert!(
             == 0
         && registers::CHANNEL_RECEIVE_CONTROL_PROGRAMMABLE_BURST_BEATS_MASK
             & (registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_BYTES_MASK
+                << registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_SHIFT)
+            == 0
+        && ((BUFFER_BYTES as u32) << registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_SHIFT)
+            & !(registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_BYTES_MASK
                 << registers::CHANNEL_RECEIVE_CONTROL_BUFFER_SIZE_SHIFT)
             == 0
         && (0xffff << registers::TRANSMIT_FLOW_CONTROL_QUEUE_0_PAUSE_TIME_SHIFT)
@@ -518,7 +523,7 @@ pub const fn mac_configuration(current: u32, link: Link, loopback: bool) -> u32 
 
 /// The MAC word's fields share no bit: the speed, duplex and loopback bits the function clears
 /// first, and the five bits the final chain sets; the compiler checks it here, and the mutation
-/// exclusion for `mac_configuration` names this constant. A swap inside either group is
+/// exemption for `mac_configuration` names this constant. A swap inside either group is
 /// `|`-versus-`^` over disjoint bits; the chain's first swap toggles `configuration` itself, and
 /// `the_mac_word_from_zero_and_from_all_ones` kills it.
 #[allow(dead_code)]
@@ -894,6 +899,7 @@ mod tests {
         fill: u32,
         registers: std::collections::BTreeMap<u32, u32>,
         writes: std::vec::Vec<(u32, u32)>,
+        delayed_microseconds: u64,
     }
 
     impl Seeded {
@@ -902,6 +908,7 @@ mod tests {
                 fill,
                 registers: std::collections::BTreeMap::new(),
                 writes: std::vec::Vec::new(),
+                delayed_microseconds: 0,
             }
         }
         fn register(&self, offset: u32) -> u32 {
@@ -917,7 +924,14 @@ mod tests {
             self.writes.push((offset, value));
             self.registers.insert(offset, value);
         }
-        fn delay_microseconds(&mut self, _microseconds: u64) {}
+        fn delay_microseconds(&mut self, microseconds: u64) {
+            self.delayed_microseconds += microseconds;
+            assert!(
+                self.delayed_microseconds <= 10 * RESET_LIMIT_MICROSECONDS,
+                "a wait ran far past every limit: {} microseconds",
+                self.delayed_microseconds
+            );
+        }
     }
 
     /// 40-bit addressing and 2 KiB queue memories, the simulated controller's identity.
@@ -1085,6 +1099,24 @@ mod tests {
                 "{register:#x} from all ones"
             );
         }
+    }
+
+    /// The permitted burst lengths are taken as the caller gives them and added to the outstanding
+    /// limits, never folded into them: a caller's bit inside the write limit's field stays set
+    /// beside the limit written there.
+    #[test]
+    fn the_permitted_burst_lengths_are_added_to_the_limits_as_given() {
+        let bus = BusConfiguration {
+            bus_burst_beats_permitted: 1 << 24,
+            read_outstanding: 0,
+            write_outstanding: 1,
+            ..ODD
+        };
+        let hardware = configured(0, &THIRTY_TWO_BIT, &bus, PHYSICAL_ADDRESS);
+        assert_eq!(
+            hardware.register(registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_REGISTER),
+            0x0100_0000
+        );
     }
 
     /// Both queue modes in both modes from both starting states, at a queue memory big enough for flow
