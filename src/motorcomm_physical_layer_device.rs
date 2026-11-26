@@ -273,13 +273,20 @@ const FIXED_DELAY_PICOSECONDS: u32 = 1900;
 const STEP_PICOSECONDS: u32 = 150;
 
 impl Settings {
-    /// **These settings as one word**, for a process that hands them to another: bits 3:0 the
-    /// receive delay, 4 the fixed delay, 8:5 the transmit delay, 11:9 the three clock inversions
-    /// (10, 100 and 1000 Mbit/s from bit 9), 13:12 the source (0 vendor, 1 mainline, 2 fallback),
-    /// then the receive clock drive at bit 14 and the receive data drive at bit 39, each a tag bit
-    /// (0 a code, 1 microamps) and 24 bits of value above it. `None` when a select is past its
+    /// **These settings as one word**: bits 3:0 the receive delay, 4 the fixed delay, 8:5 the
+    /// transmit delay, 11:9 the three clock inversions (10, 100 and 1000 Mbit/s from bit 9), 13:12
+    /// the source (0 vendor, 1 mainline, 2 fallback), then the receive clock drive at bit 14 and
+    /// the receive data drive at bit 39, each a tag bit (0 a code, 1 microamps) and 24 bits of
+    /// value above it. `None` when a select is past its
     /// field or a drive past 24 bits, which no tree this crate parses produces.
-    pub const fn to_word(&self) -> Option<u64> {
+    ///
+    /// Crate-private: a word a caller stores or sends fixes its layout, and the layout has no
+    /// version field. It opens only with one, in its top bits, and a layout frozen with it.
+    #[allow(
+        dead_code,
+        reason = "kept, tested, until a caller needs the word and it gains a version"
+    )]
+    pub(crate) const fn to_word(self) -> Option<u64> {
         const fn drive(d: PadDriveStrength) -> Option<u64> {
             match d {
                 PadDriveStrength::Code(c) => Some((c as u64) << 1),
@@ -316,7 +323,11 @@ impl Settings {
     }
 
     /// [`Settings::to_word`]'s inverse. `None` for a source past the three.
-    pub const fn from_word(word: u64) -> Option<Settings> {
+    #[allow(
+        dead_code,
+        reason = "kept, tested, until a caller needs the word and it gains a version"
+    )]
+    pub(crate) const fn from_word(word: u64) -> Option<Settings> {
         const fn drive(bits: u64) -> PadDriveStrength {
             let value = (bits >> 1) & 0xff_ffff;
             if bits & 1 == 0 {
