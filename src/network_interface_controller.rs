@@ -894,6 +894,7 @@ mod tests {
         fill: u32,
         registers: std::collections::BTreeMap<u32, u32>,
         writes: std::vec::Vec<(u32, u32)>,
+        delayed_microseconds: u64,
     }
 
     impl Seeded {
@@ -902,6 +903,7 @@ mod tests {
                 fill,
                 registers: std::collections::BTreeMap::new(),
                 writes: std::vec::Vec::new(),
+                delayed_microseconds: 0,
             }
         }
         fn register(&self, offset: u32) -> u32 {
@@ -917,7 +919,14 @@ mod tests {
             self.writes.push((offset, value));
             self.registers.insert(offset, value);
         }
-        fn delay_microseconds(&mut self, _microseconds: u64) {}
+        fn delay_microseconds(&mut self, microseconds: u64) {
+            self.delayed_microseconds += microseconds;
+            assert!(
+                self.delayed_microseconds <= 10 * RESET_LIMIT_MICROSECONDS,
+                "a wait ran far past every limit: {} microseconds",
+                self.delayed_microseconds
+            );
+        }
     }
 
     /// 40-bit addressing and 2 KiB queue memories, the simulated controller's identity.

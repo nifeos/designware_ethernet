@@ -453,6 +453,11 @@ mod tests {
         }
         fn delay_microseconds(&mut self, microseconds: u64) {
             self.waited_microseconds += microseconds;
+            assert!(
+                self.waited_microseconds <= 10 * COMMAND_LIMIT_MICROSECONDS,
+                "a wait for the bus ran far past its limit: {} microseconds",
+                self.waited_microseconds
+            );
         }
     }
 
