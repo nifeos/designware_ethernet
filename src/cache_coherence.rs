@@ -15,8 +15,7 @@
 
 use crate::{
     CRC_BYTES, DataPlane, DirectMemoryAccessRegion, RECEIVE_DESCRIPTOR_WORD_3_OWNED_BY_DEVICE,
-    RECEIVE_ENTRIES, ReceiveVerdict, TRANSMIT_DESCRIPTOR_WORD_3_OWNED_BY_DEVICE, Tails,
-    TransmitError, layout, receive_verdict, registers,
+    ReceiveVerdict, Tails, TransmitError, layout, receive_verdict, registers,
 };
 
 /// The probe frame's `EtherType`: IEEE 802's first local experimental type, which no real
@@ -220,15 +219,6 @@ pub fn classify(observation: &Observation) -> Verdict {
     Verdict::Inconclusive
 }
 
-/// Whether the transmit descriptor was handed back, for a report line.
-pub const fn is_transmit_complete(observation: &Observation) -> bool {
-    observation.transmit_descriptor_word_3 & TRANSMIT_DESCRIPTOR_WORD_3_OWNED_BY_DEVICE == 0
-}
-
-/// How many receive descriptors the probe posts, for a report line: every one but the held-back
-/// slot, as [`DataPlane::start`] does.
-pub const POSTED_RECEIVE_ENTRIES: u16 = RECEIVE_ENTRIES - 1;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,8 +227,17 @@ mod tests {
     use crate::simulator::{BUS_CONFIGURATION, Memory, NetworkInterfaceController};
     use crate::{
         Hardware, RECEIVE_DESCRIPTOR_WORD_3_FIRST_DESCRIPTOR,
-        RECEIVE_DESCRIPTOR_WORD_3_LAST_DESCRIPTOR,
+        RECEIVE_DESCRIPTOR_WORD_3_LAST_DESCRIPTOR, RECEIVE_ENTRIES,
+        TRANSMIT_DESCRIPTOR_WORD_3_OWNED_BY_DEVICE,
     };
+
+    /// Whether the transmit descriptor was handed back to the CPU.
+    const fn is_transmit_complete(observation: &Observation) -> bool {
+        observation.transmit_descriptor_word_3 & TRANSMIT_DESCRIPTOR_WORD_3_OWNED_BY_DEVICE == 0
+    }
+
+    /// How many receive descriptors the probe posts: every one but the held-back slot.
+    const POSTED_RECEIVE_ENTRIES: u16 = RECEIVE_ENTRIES - 1;
 
     const PHYSICAL_ADDRESS: u64 = 0x4800_0000;
     const STATION_MAC_ADDRESS: [u8; 6] = [0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c];
