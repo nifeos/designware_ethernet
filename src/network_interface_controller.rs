@@ -444,13 +444,14 @@ pub fn configure(
 }
 
 /// The register fields configure composes share no bit: the outstanding-limit masks against each
-/// other and against the burst-length bits (which is what `bus_burst_beats_permitted` carries), the
-/// transmit and receive burst-length fields against the bits set beside them, the receive buffer
-/// size against the receive burst-length field, and the pause time against the flow-control
-/// enable; the compiler checks it here, and the mutation exclusion for `configure` and the triage
-/// rows for `program_system_bus_mode` and `program_channel_bursts` name this constant. A field
-/// value reaches its `|` through its own mask, and a word whose field the line above cleared takes
-/// a value only inside that field; where neither holds, the configure tests kill the swap.
+/// other and against the burst-length bits, the transmit and receive burst-length fields against
+/// the bits set beside them, the receive buffer size against the receive burst-length field (and
+/// the size written inside its own field), and the pause time against the flow-control enable;
+/// the compiler checks it here, and the mutation exemptions for `configure`,
+/// `program_system_bus_mode` and `program_channel_bursts` name this constant. A field value
+/// reaches its `|` through its own mask, and a word whose field the line above cleared takes a
+/// value only inside that field. `bus_burst_beats_permitted` is neither: it is a public field the
+/// caller fills, so nothing here bounds it, and a test kills the swap of its `|`.
 #[allow(dead_code)]
 pub(crate) const CONFIGURED_BUS_FIELDS_DO_NOT_OVERLAP: () = assert!(
     registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_READ_OUTSTANDING_REQUEST_LIMIT_MASK
@@ -1094,6 +1095,24 @@ mod tests {
                 "{register:#x} from all ones"
             );
         }
+    }
+
+    /// The permitted burst lengths are taken as the caller gives them and added to the outstanding
+    /// limits, never folded into them: a caller's bit inside the write limit's field stays set
+    /// beside the limit written there.
+    #[test]
+    fn the_permitted_burst_lengths_are_added_to_the_limits_as_given() {
+        let bus = BusConfiguration {
+            bus_burst_beats_permitted: 1 << 24,
+            read_outstanding: 0,
+            write_outstanding: 1,
+            ..ODD
+        };
+        let hardware = configured(0, &THIRTY_TWO_BIT, &bus, PHYSICAL_ADDRESS);
+        assert_eq!(
+            hardware.register(registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_REGISTER),
+            0x0100_0000
+        );
     }
 
     /// Both queue modes in both modes from both starting states, at a queue memory big enough for flow

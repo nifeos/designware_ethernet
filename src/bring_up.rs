@@ -513,6 +513,23 @@ mod tests {
         );
     }
 
+    /// A probe frame that never comes back costs the probe its whole wait and not a microsecond
+    /// more: the wait is the only delay the probe makes, and it stops once the bound is reached.
+    #[test]
+    fn a_probe_frame_that_never_returns_costs_exactly_the_wait() {
+        let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
+        p.break_loopback();
+        let id = Identity::read(&mut p);
+        let mut account = Account::default();
+        let before = p.now_microseconds();
+        probe(&mut p, &id, &inputs(), STATION, &mut account).unwrap();
+        assert_eq!(
+            p.now_microseconds() - before,
+            cache_coherence::WAIT_MICROSECONDS
+        );
+        assert!(account.coherence.is_some());
+    }
+
     /// The region is zeroed, the whole of it: a word the probe or a previous wiring left behind
     /// would read as a received frame.
     #[test]
