@@ -595,21 +595,21 @@ fn a_frame_longer_than_the_offered_room_is_dropped_and_counted_apart() {
         None
     );
     assert_eq!(data_plane.dropped(), 1);
-    assert_eq!(data_plane.dropped_for_room(), 1);
+    assert_eq!(data_plane.dropped_for_lack_of_room(), 1);
     assert!(network_interface_controller.wire_in_with_error(&frame(64, 2)));
     assert_eq!(
         network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut short)),
         None
     );
     assert_eq!(data_plane.dropped(), 2);
-    assert_eq!(data_plane.dropped_for_room(), 1);
+    assert_eq!(data_plane.dropped_for_lack_of_room(), 1);
     let good = frame(60, 3);
     assert!(network_interface_controller.wire_in(&good));
     let n = network_interface_controller
         .with(|r, t| data_plane.receive(r, t, &mut short))
         .unwrap();
     assert_eq!(&short[..n], &good[..]);
-    assert_eq!(data_plane.dropped_for_room(), 1);
+    assert_eq!(data_plane.dropped_for_lack_of_room(), 1);
 }
 
 /// The three answers `receive_verdict` gives: a frame with the CRC stripped, a descriptor the

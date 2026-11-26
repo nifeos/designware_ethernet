@@ -19,7 +19,7 @@ sentence beside it.
 - Breaking: the bring-up refuses an inconclusive coherence probe unless the caller sets
   `Inputs::accept_inconclusive_coherence`. Before, it went on as if coherent.
 - Breaking: `Settings::to_word` and `from_word` are private until the word carries a version.
-- `DataPlane::receive` counts a frame longer than `out` in `dropped_for_room` as well as
+- `DataPlane::receive` counts a frame longer than `out` in `dropped_for_lack_of_room` as well as
   `dropped`, so a caller can tell its short buffer from a bad frame.
 - `management_data_io::ClockRange` and `BusConfiguration::management_data_io_clock_range` set the
   management data input/output (MDIO) clock range; `Bus::with_clock_range` takes one. Before, the
