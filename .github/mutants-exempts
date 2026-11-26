@@ -13,7 +13,7 @@
 # survived. Each of the 66 survivors falls under one of the 64 lines below.
 
 src/cache_coherence.rs:46 # the set bit 0x40 and the counter masked to 0x3f share no bit (PROBE_PAYLOAD_SET_BIT_AND_COUNTER_DO_NOT_OVERLAP)
-src/data_plane.rs:269 # the layout functions reduce the index modulo the ring, so the sum and its remainder name the same entry
+src/data_plane.rs:258 # the layout functions reduce the index modulo the ring, so the sum and its remainder name the same entry
 src/descriptor.rs:117 # share no bit (asserted beside it, RECEIVE_DESCRIPTOR_SET_BITS_DO_NOT_OVERLAP)
 src/descriptor.rs:118 # share no bit (asserted beside it, RECEIVE_DESCRIPTOR_SET_BITS_DO_NOT_OVERLAP)
 src/descriptor.rs:146 # share no bit (asserted beside it, TRANSMIT_DESCRIPTOR_BITS_DO_NOT_OVERLAP)
@@ -23,13 +23,13 @@ src/descriptor.rs:150 # share no bit (asserted beside it, TRANSMIT_DESCRIPTOR_BI
 src/descriptor.rs:153 # share no bit (asserted beside it, TRANSMIT_DESCRIPTOR_BITS_DO_NOT_OVERLAP)
 src/descriptor.rs:214 # share no bit (asserted beside it, FIRST_AND_LAST_BITS_DO_NOT_OVERLAP)
 src/descriptor.rs:215 # share no bit (asserted beside it, FIRST_AND_LAST_BITS_DO_NOT_OVERLAP)
-src/management_data_io.rs:114 # 1 << 0 and 1 >> 0 are both 1
-src/management_data_io.rs:262 # share no bit (asserted beside it, COMMAND_WORD_FIELDS_DO_NOT_OVERLAP)
-src/management_data_io.rs:264 # share no bit (asserted beside it, COMMAND_WORD_FIELDS_DO_NOT_OVERLAP)
+src/management_data_io.rs:115 # 1 << 0 and 1 >> 0 are both 1
+src/management_data_io.rs:263 # share no bit (asserted beside it, COMMAND_WORD_FIELDS_DO_NOT_OVERLAP)
 src/management_data_io.rs:265 # share no bit (asserted beside it, COMMAND_WORD_FIELDS_DO_NOT_OVERLAP)
-src/management_data_io.rs:270 # share no bit (asserted beside it, COMMAND_WORD_FIELDS_DO_NOT_OVERLAP)
-src/management_data_io.rs:438 # share no bit (asserted beside it, PHYSICAL_LAYER_DEVICE_ID_HALVES_DO_NOT_OVERLAP)
-src/management_data_io.rs:489 # share no bit (asserted beside it, AUTONEGOTIATION_ENABLE_AND_RESTART_DO_NOT_OVERLAP)
+src/management_data_io.rs:266 # share no bit (asserted beside it, COMMAND_WORD_FIELDS_DO_NOT_OVERLAP)
+src/management_data_io.rs:271 # share no bit (asserted beside it, COMMAND_WORD_FIELDS_DO_NOT_OVERLAP)
+src/management_data_io.rs:439 # share no bit (asserted beside it, PHYSICAL_LAYER_DEVICE_ID_HALVES_DO_NOT_OVERLAP)
+src/management_data_io.rs:490 # share no bit (asserted beside it, AUTONEGOTIATION_ENABLE_AND_RESTART_DO_NOT_OVERLAP)
 src/motorcomm_physical_layer_device.rs:127 # share no bit (asserted beside it, RECEIVE_DATA_DRIVE_FIELDS_DO_NOT_OVERLAP)
 src/motorcomm_physical_layer_device.rs:204 # share no bit (asserted beside it, PARTNER_HUNDRED_MEGABIT_ABILITIES_DO_NOT_OVERLAP)
 src/motorcomm_physical_layer_device.rs:321 # a value shifted left by one has bit 0 clear, so its | with 1 is its ^
@@ -58,15 +58,15 @@ src/network_interface_controller.rs:380 # share no bit (asserted in CONFIGURED_B
 src/network_interface_controller.rs:384 # the field was cleared from the word read back and the value is taken through the same mask, so they share no bit for every input
 src/network_interface_controller.rs:387 # share no bit (asserted in CONFIGURED_BUS_FIELDS_DO_NOT_OVERLAP)
 src/network_interface_controller.rs:394 # RECEIVE_RING is zero (asserted in layout.rs), so adding and subtracting it agree
-src/network_interface_controller.rs:520 # the pause time and the enable share no bit (asserted in CONFIGURED_BUS_FIELDS_DO_NOT_OVERLAP)
+src/network_interface_controller.rs:513 # the pause time and the enable share no bit (asserted in CONFIGURED_BUS_FIELDS_DO_NOT_OVERLAP)
+src/network_interface_controller.rs:598 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
+src/network_interface_controller.rs:599 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
+src/network_interface_controller.rs:600 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
 src/network_interface_controller.rs:605 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
-src/network_interface_controller.rs:606 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
-src/network_interface_controller.rs:607 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
-src/network_interface_controller.rs:612 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
-src/network_interface_controller.rs:624 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
-src/network_interface_controller.rs:625 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
-src/network_interface_controller.rs:626 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
-src/network_interface_controller.rs:627 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
+src/network_interface_controller.rs:617 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
+src/network_interface_controller.rs:618 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
+src/network_interface_controller.rs:619 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
+src/network_interface_controller.rs:620 # share no bit (asserted beside it, MAC_CONFIGURATION_BITS_DO_NOT_OVERLAP)
 src/registers.rs:28 # 1 << 0 and 1 >> 0 are both 1
 src/registers.rs:94 # 1 << 0 and 1 >> 0 are both 1
 src/registers.rs:102 # 1 << 0 and 1 >> 0 are both 1
