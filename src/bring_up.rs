@@ -7,11 +7,18 @@
 //! The clocks, the resets and the board's interface select come first and are not here: they sit
 //! in windows the controller does not own. So does everything a board's device tree says, which
 //! the caller hands over in [`Inputs`].
+//!
+//! The one bring-up here, [`bring_up_with_motorcomm_yt8531`], serves a board whose physical layer
+//! device is a Motorcomm `YT8531` and refuses any other. A board with another device drives the
+//! controller with the module functions this one calls; a bring-up that takes any physical layer
+//! device can follow as an addition.
 
 use crate::cache_coherence::{self, Observation, Verdict};
 use crate::link::{Link, Speed};
 use crate::motorcomm_physical_layer_device::{self, Settings, SettingsSource};
-use crate::network_interface_controller::{self as controller, BusConfiguration, Identity};
+use crate::network_interface_controller::{
+    self as controller, BusConfiguration, Identity, StationMacAddress,
+};
 use crate::{
     DataPlane, DirectMemoryAccessRegion, Hardware, Tails, layout, management_data_io, registers,
 };
@@ -46,14 +53,16 @@ pub trait Port: Hardware {
         &mut self,
         f: impl FnOnce(&mut Self::Region<'_>, &mut Self::Tails<'_>) -> R,
     ) -> R;
-    /// A monotonic clock, in microseconds. It never goes backwards: the bring-up subtracts an
-    /// earlier reading from a later one.
+    /// A monotonic clock, in microseconds. It should never go backwards; if it does, the bring-up
+    /// reads the step back as no time passed, so a wait runs longer and never ends early.
     fn now_microseconds(&mut self) -> u64;
 }
 
 /// **What the board and its tree say about this port**, everything the bring-up needs that the
-/// controller cannot tell it.
+/// controller cannot tell it. Build one with [`Inputs::new`] and set the optional fields after
+/// it; the struct is `#[non_exhaustive]`, so an input added later is not a break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Inputs {
     /// The DMA region's physical base, which descriptors name.
     pub region_physical_address: u64,
@@ -65,7 +74,7 @@ pub struct Inputs {
     /// Electronics Engineers (IEEE) 802.3 standard's name for it: the tree's `local-mac-address`,
     /// if it has one.
     #[doc(alias = "mac_address")]
-    pub station_mac_address: Option<[u8; 6]>,
+    pub station_mac_address: Option<StationMacAddress>,
     /// (`physical_layer_device_bus_address`, the IEEE 802.3 standard's physical layer device address) The physical layer device's MDIO
     /// address.
     #[doc(alias = "phy")]
@@ -74,6 +83,32 @@ pub struct Inputs {
     /// The physical layer device's board settings.
     #[doc(alias = "phy")]
     pub physical_layer_device: Settings,
+    /// Whether an inconclusive coherence probe ([`Verdict::Inconclusive`]: the loopback frame never
+    /// completed, so nothing was measured) lets the bring-up go on as if the platform were
+    /// coherent. `false` by default, which refuses it with [`Error::NotCoherent`]; set it only for
+    /// a platform known to be coherent whose loopback cannot complete.
+    pub accept_inconclusive_coherence: bool,
+}
+
+impl Inputs {
+    /// The inputs every port needs: the DMA region's physical base, the bus configuration, and the
+    /// physical layer device's MDIO address and board settings. The station address starts as
+    /// `None`, so the bring-up takes the one the controller's registers hold.
+    pub const fn new(
+        region_physical_address: u64,
+        bus_configuration: BusConfiguration,
+        physical_layer_device_bus_address: u8,
+        physical_layer_device: Settings,
+    ) -> Inputs {
+        Inputs {
+            region_physical_address,
+            bus_configuration,
+            station_mac_address: None,
+            physical_layer_device_bus_address,
+            physical_layer_device,
+            accept_inconclusive_coherence: false,
+        }
+    }
 }
 
 /// How long the bring-up waits for the physical layer device to resolve a link after autonegotiation restarts. A
@@ -143,7 +178,7 @@ pub struct Account {
     /// (`station_mac_address`, the IEEE 802.3 standard's name for a MAC address) The station address
     /// and where it came from.
     #[doc(alias = "mac_address")]
-    pub station_mac_address: Option<([u8; 6], AddressSource)>,
+    pub station_mac_address: Option<(StationMacAddress, AddressSource)>,
     /// How long each software reset took, in microseconds: the probe's, then the real one's.
     pub resets_microseconds: [u64; 2],
     /// The coherence probe's verdict and what it saw.
@@ -154,18 +189,58 @@ pub struct Account {
     pub link_wait_milliseconds: u64,
 }
 
-/// **Bring the port up**, recording into `account` as it goes. On success the controller runs at
+/// **What a bring-up that succeeded answers.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BroughtUp {
+    /// The station address programmed into the controller.
+    #[doc(alias = "mac_address")]
+    pub station_mac_address: StationMacAddress,
+    /// The negotiated link, or `None` when none resolved within [`LINK_WAIT_MILLISECONDS`]: the
+    /// rings are then programmed and the controller is not started.
+    pub link: Option<Link>,
+}
+
+/// **Bring the port up with a Motorcomm `YT8531` physical layer device**, recording into `account`
+/// as it goes. A device with any other identifier is refused with
+/// [`Error::UnknownPhysicalLayerDevice`]. On success the controller runs at
 /// the link's speed with both rings programmed and empty, and the answer is the station address
 /// and the link; with no link the rings are programmed and the controller is not started.
 ///
 /// # Errors
 ///
 /// The first [`Error`] the sequence meets; `account` holds what it saw until then.
-pub fn bring_up(
+///
+/// # Examples
+///
+/// A caller's [`Port`] reaches the window, the DMA region and a clock; the board's device tree
+/// supplies the rest, here the vendor tree's delay values and a station address:
+///
+/// ```no_run
+/// use designware_ethernet::bring_up::{Account, Error, Inputs, Port};
+/// use designware_ethernet::management_data_io::ClockRange;
+/// use designware_ethernet::motorcomm_physical_layer_device::{PadDriveStrength, Settings, SettingsSource};
+/// use designware_ethernet::network_interface_controller::BusConfiguration;
+/// use designware_ethernet::{StationMacAddress, bring_up::bring_up_with_motorcomm_yt8531};
+///
+/// fn start_port(port: &mut impl Port, region_physical_address: u64) -> Result<(), Error> {
+///     let mut bus = BusConfiguration::new(16, 16);
+///     bus.management_data_io_clock_range = ClockRange::From250To300Megahertz;
+///     let drive = (PadDriveStrength::Code(6), PadDriveStrength::Code(3));
+///     let settings = Settings::new(0xa, false, 0xa, drive.0, drive.1, [true; 3], SettingsSource::VendorTree);
+///     let mut inputs = Inputs::new(region_physical_address, bus, 0, settings);
+///     inputs.station_mac_address = StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]);
+///     let brought_up = bring_up_with_motorcomm_yt8531(port, &inputs, &mut Account::default())?;
+///     // With no link (no cable), the rings are programmed and the controller is not started.
+///     let _ = brought_up.link;
+///     Ok(())
+/// }
+/// ```
+pub fn bring_up_with_motorcomm_yt8531(
     port: &mut impl Port,
     inputs: &Inputs,
     account: &mut Account,
-) -> Result<([u8; 6], Option<Link>), Error> {
+) -> Result<BroughtUp, Error> {
     let id = Identity::read(port);
     account.version = id.version;
     account.direct_memory_access_physical_address_bits =
@@ -195,7 +270,12 @@ pub fn bring_up(
     account.resets_microseconds[0] = controller::soft_reset(port).map_err(Error::Controller)?;
 
     let verdict = probe(port, &id, inputs, station, account)?;
-    if !matches!(verdict, Verdict::Coherent | Verdict::Inconclusive) {
+    let accepted = match verdict {
+        Verdict::Coherent => true,
+        Verdict::Inconclusive => inputs.accept_inconclusive_coherence,
+        _ => false,
+    };
+    if !accepted {
         return Err(Error::NotCoherent(verdict));
     }
 
@@ -213,7 +293,10 @@ pub fn bring_up(
     .map_err(Error::Controller)?;
 
     let link = wait_for_link(port, inputs, account)?;
-    Ok((station, link))
+    Ok(BroughtUp {
+        station_mac_address: station,
+        link,
+    })
 }
 
 /// Identify the physical layer device, refuse any other part, and configure it for the board.
@@ -223,9 +306,14 @@ fn bring_up_physical_layer_device(
     account: &mut Account,
 ) -> Result<(), Error> {
     let device = inputs.physical_layer_device_bus_address;
-    account.physical_layer_device_id =
-        management_data_io::physical_layer_device_id(&mut management_data_io::Bus(port), device)
-            .map_err(Error::ManagementDataIo)?;
+    account.physical_layer_device_id = management_data_io::physical_layer_device_id(
+        &mut management_data_io::Bus::with_clock_range(
+            port,
+            inputs.bus_configuration.management_data_io_clock_range,
+        ),
+        device,
+    )
+    .map_err(Error::ManagementDataIo)?;
     if account.physical_layer_device_id
         != motorcomm_physical_layer_device::MOTORCOMM_YT8531_PHYSICAL_LAYER_DEVICE_ID
     {
@@ -234,7 +322,10 @@ fn bring_up_physical_layer_device(
         });
     }
     let applied = motorcomm_physical_layer_device::configure(
-        &mut management_data_io::Bus(port),
+        &mut management_data_io::Bus::with_clock_range(
+            port,
+            inputs.bus_configuration.management_data_io_clock_range,
+        ),
         device,
         &inputs.physical_layer_device,
     )
@@ -254,28 +345,40 @@ fn wait_for_link(
     account: &mut Account,
 ) -> Result<Option<Link>, Error> {
     let device = inputs.physical_layer_device_bus_address;
-    management_data_io::restart_autonegotiation(&mut management_data_io::Bus(&mut *port), device)
-        .map_err(Error::ManagementDataIo)?;
+    management_data_io::restart_autonegotiation(
+        &mut management_data_io::Bus::with_clock_range(
+            &mut *port,
+            inputs.bus_configuration.management_data_io_clock_range,
+        ),
+        device,
+    )
+    .map_err(Error::ManagementDataIo)?;
     let started = port.now_microseconds();
     let link = loop {
         if let Some(l) = motorcomm_physical_layer_device::read_link(
-            &mut management_data_io::Bus(&mut *port),
+            &mut management_data_io::Bus::with_clock_range(
+                &mut *port,
+                inputs.bus_configuration.management_data_io_clock_range,
+            ),
             device,
         )
         .map_err(Error::ManagementDataIo)?
         {
             break Some(l);
         }
-        if port.now_microseconds() - started >= LINK_WAIT_MILLISECONDS * 1000 {
+        if port.now_microseconds().saturating_sub(started) >= LINK_WAIT_MILLISECONDS * 1000 {
             break None;
         }
         port.delay_microseconds(LINK_POLL_MICROSECONDS);
     };
-    account.link_wait_milliseconds = (port.now_microseconds() - started) / 1000;
+    account.link_wait_milliseconds = port.now_microseconds().saturating_sub(started) / 1000;
     account.link = link;
     if let Some(l) = link {
         motorcomm_physical_layer_device::apply_speed(
-            &mut management_data_io::Bus(&mut *port),
+            &mut management_data_io::Bus::with_clock_range(
+                &mut *port,
+                inputs.bus_configuration.management_data_io_clock_range,
+            ),
             device,
             &inputs.physical_layer_device,
             l.speed,
@@ -292,7 +395,7 @@ fn probe(
     port: &mut impl Port,
     id: &Identity,
     inputs: &Inputs,
-    station: [u8; 6],
+    station: StationMacAddress,
     account: &mut Account,
 ) -> Result<Verdict, Error> {
     let region = inputs.region_physical_address;
@@ -311,7 +414,7 @@ fn probe(
     let _ = port.with_region(|r, t| cache_coherence::prepare(&mut data_plane, r, t, station));
     let started = port.now_microseconds();
     while !port.with_region(|r, _| cache_coherence::is_delivered(r))
-        && port.now_microseconds() - started < cache_coherence::WAIT_MICROSECONDS
+        && port.now_microseconds().saturating_sub(started) < cache_coherence::WAIT_MICROSECONDS
     {
         port.delay_microseconds(1);
     }
@@ -341,7 +444,8 @@ mod tests {
     };
 
     const REGION: u64 = 0x4800_0000;
-    const STATION: [u8; 6] = [0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c];
+    const STATION: StationMacAddress =
+        StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).unwrap();
     const GIGABIT: Link = Link {
         speed: Speed::Thousand,
         full_duplex: true,
@@ -354,6 +458,7 @@ mod tests {
             station_mac_address: Some(STATION),
             physical_layer_device_bus_address: 0,
             physical_layer_device: PHYSICAL_LAYER_DEVICE_SETTINGS,
+            accept_inconclusive_coherence: false,
         }
     }
 
@@ -370,8 +475,11 @@ mod tests {
         let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
-            Ok((STATION, Some(GIGABIT)))
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
+            Ok(BroughtUp {
+                station_mac_address: STATION,
+                link: Some(GIGABIT)
+            })
         );
         assert!(matches!(account.coherence, Some((Verdict::Coherent, _))));
         assert_eq!(
@@ -402,8 +510,11 @@ mod tests {
         let mut p = port(Memory::coherent(REGION), None);
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
-            Ok((STATION, None))
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
+            Ok(BroughtUp {
+                station_mac_address: STATION,
+                link: None
+            })
         );
         assert!(account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS);
         assert_eq!(
@@ -420,7 +531,7 @@ mod tests {
         let mut p = port(Memory::write_back_unsnooped(REGION), Some(GIGABIT));
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Err(Error::NotCoherent(Verdict::DeviceCannotSeeCpuWrites))
         );
         assert!(account.coherence.is_some());
@@ -437,7 +548,7 @@ mod tests {
             ..inputs()
         };
         assert_eq!(
-            bring_up(&mut p, &no_tree, &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &no_tree, &mut account),
             Err(Error::NoStationAddress)
         );
         assert_eq!(account.physical_layer_device_id, 0);
@@ -451,7 +562,7 @@ mod tests {
             .write_raw(PHYSICAL_LAYER_DEVICE_ID_1_REGISTER, 0x1234);
         let mut account = Account::default();
         assert!(matches!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Err(Error::UnknownPhysicalLayerDevice { .. })
         ));
         assert_eq!(account.physical_layer_device, None);
@@ -465,7 +576,7 @@ mod tests {
         p.stop_receive_clock();
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
             Err(Error::Controller(controller::Error::ResetTimeout))
         );
         assert!(account.physical_layer_device.is_some());
@@ -481,7 +592,7 @@ mod tests {
             p.set_register(registers::CORE_VERSION_REGISTER, version);
             let mut account = Account::default();
             assert_eq!(
-                bring_up(&mut p, &inputs(), &mut account),
+                bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
                 Err(Error::Silent { version })
             );
             assert_eq!(account.version, version);
@@ -495,7 +606,7 @@ mod tests {
     fn the_link_wait_is_reported_in_milliseconds_of_the_time_spent() {
         let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
         let mut account = Account::default();
-        bring_up(&mut p, &inputs(), &mut account).unwrap();
+        bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();
         assert!(
             account.link_wait_milliseconds < LINK_POLL_MICROSECONDS / 1000,
             "a link already up costs under one poll: {}",
@@ -503,7 +614,7 @@ mod tests {
         );
         let mut p = port(Memory::coherent(REGION), None);
         let mut account = Account::default();
-        bring_up(&mut p, &inputs(), &mut account).unwrap();
+        bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();
         assert!(account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS);
         assert!(
             account.link_wait_milliseconds
@@ -530,6 +641,63 @@ mod tests {
         assert!(account.coherence.is_some());
     }
 
+    /// Every MDIO command the bring-up sends carries the clock range the bus configuration names,
+    /// not the default.
+    #[test]
+    fn the_bring_up_drives_management_data_io_at_the_configured_clock_range() {
+        let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
+        let mut account = Account::default();
+        bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();
+        let command = p.register(registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER);
+        assert_eq!(
+            (command >> management_data_io::CLOCK_RANGE_SHIFT)
+                & management_data_io::CLOCK_RANGE_FIELD_MASK,
+            BUS_CONFIGURATION.management_data_io_clock_range.field()
+        );
+        assert_ne!(
+            BUS_CONFIGURATION.management_data_io_clock_range,
+            management_data_io::ClockRange::default()
+        );
+    }
+
+    /// A probe that measured nothing refuses the bring-up unless the inputs accept it: the
+    /// default is the stricter answer, and the account holds what the probe saw either way.
+    #[test]
+    fn an_inconclusive_probe_refuses_the_bring_up_unless_the_inputs_accept_it() {
+        let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
+        p.break_loopback();
+        let mut account = Account::default();
+        assert_eq!(
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
+            Err(Error::NotCoherent(Verdict::Inconclusive))
+        );
+        assert!(matches!(
+            account.coherence,
+            Some((Verdict::Inconclusive, _))
+        ));
+        assert!(
+            !Inputs::new(REGION, BUS_CONFIGURATION, 0, PHYSICAL_LAYER_DEVICE_SETTINGS)
+                .accept_inconclusive_coherence
+        );
+
+        let mut p = port(Memory::coherent(REGION), Some(GIGABIT));
+        p.break_loopback();
+        let mut accepting = inputs();
+        accepting.accept_inconclusive_coherence = true;
+        let mut account = Account::default();
+        assert_eq!(
+            bring_up_with_motorcomm_yt8531(&mut p, &accepting, &mut account),
+            Ok(BroughtUp {
+                station_mac_address: STATION,
+                link: Some(GIGABIT)
+            })
+        );
+        assert!(matches!(
+            account.coherence,
+            Some((Verdict::Inconclusive, _))
+        ));
+    }
+
     /// The region is zeroed, the whole of it: a word the probe or a previous wiring left behind
     /// would read as a received frame.
     #[test]
@@ -541,7 +709,7 @@ mod tests {
             r.write_u64(last - 4096, 0xfeed);
         });
         let mut account = Account::default();
-        bring_up(&mut p, &inputs(), &mut account).unwrap();
+        bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account).unwrap();
         let (end, earlier) = p.with(|r, _| (r.read_u64(last), r.read_u64(last - 4096)));
         assert_eq!(end, 0, "the last word");
         assert_eq!(earlier, 0, "a word a page before it");
@@ -556,8 +724,11 @@ mod tests {
         p.set_clock_microseconds(1 << 40);
         let mut account = Account::default();
         assert_eq!(
-            bring_up(&mut p, &inputs(), &mut account),
-            Ok((STATION, None))
+            bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
+            Ok(BroughtUp {
+                station_mac_address: STATION,
+                link: None
+            })
         );
         assert!(matches!(account.coherence, Some((Verdict::Coherent, _))));
         assert!(account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS);
@@ -565,5 +736,31 @@ mod tests {
             account.link_wait_milliseconds
                 <= LINK_WAIT_MILLISECONDS + LINK_POLL_MICROSECONDS / 1000
         );
+    }
+
+    /// A clock that steps back reads as no time passed, never as a wrapped elapsed time: the probe
+    /// still sees its frame, and a link that never comes still costs the whole bound rather than
+    /// ending the wait at once (or panicking in a debug build).
+    #[test]
+    fn a_clock_that_steps_back_never_ends_a_wait_early() {
+        for readings in 0..4 {
+            let mut p = port(Memory::coherent(REGION), None);
+            p.set_clock_microseconds(1 << 20);
+            p.step_clock_back(readings, 1000);
+            let mut account = Account::default();
+            assert_eq!(
+                bring_up_with_motorcomm_yt8531(&mut p, &inputs(), &mut account),
+                Ok(BroughtUp {
+                    station_mac_address: STATION,
+                    link: None
+                }),
+                "a step back at reading {readings}"
+            );
+            assert!(matches!(account.coherence, Some((Verdict::Coherent, _))));
+            assert!(
+                account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS - 1,
+                "a step back at reading {readings} ended the link wait early"
+            );
+        }
     }
 }

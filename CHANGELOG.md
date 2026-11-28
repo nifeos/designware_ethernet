@@ -3,6 +3,33 @@
 Dates are UTC. One line per release, what changed and why, so a reader of the diff has the
 sentence beside it.
 
+## Unreleased
+
+- Breaking: `bring_up::bring_up` is now `bring_up_with_motorcomm_yt8531`, since it brings up that
+  one physical layer device. A board with another device drives the controller through the module
+  functions, and a generic bring-up can follow as an addition.
+- Breaking: `bring_up_with_motorcomm_yt8531` returns `BroughtUp`, the station address it
+  programmed and the link it found. Before, a caller could not learn which address the controller
+  took.
+- Breaking: a station address is a `StationMacAddress`, whose constructor refuses all zeros, all
+  ones and a multicast address. `configure`, `Inputs`, `Account` and the coherence probe take
+  it, so an unusable address never reaches the controller.
+- Breaking: `Link`, `BusConfiguration`, `Settings` and `Inputs` are `#[non_exhaustive]` with a
+  `new` constructor, and `Bus::new` builds a `Bus`, so a later field needs no major version. `DataPlane::dropped` is a method.
+- Breaking: the bring-up refuses an inconclusive coherence probe unless the caller sets
+  `Inputs::accept_inconclusive_coherence`. Before, it went on as if coherent.
+- Breaking: `Settings::to_word` and `from_word` are private until the word carries a version.
+- `DataPlane::receive` counts a frame longer than `out` in `dropped_for_lack_of_room` as well as
+  `dropped`, so a caller can tell its short buffer from a bad frame.
+- `management_data_io::ClockRange` and `BusConfiguration::management_data_io_clock_range` set the
+  management data input/output (MDIO) clock range; `Bus::with_clock_range` takes one. Before, the
+  driver always programmed the range for a 500 to 800 megahertz clock, which stays the default.
+- A clock that steps back no longer ends a bring-up wait early: elapsed time saturates at zero.
+- Every fallible public function documents its errors; the bring-up, `configure` and `DataPlane`
+  carry examples, and the README is the crate page. The README no longer claims a board run.
+- The package ships only the source, the licenses, the README and the CHANGELOG, and the manifest
+  names its documentation.
+
 ## 0.1.0-pre.1
 
 - First version.

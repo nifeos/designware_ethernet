@@ -29,9 +29,17 @@ impl Speed {
 
 /// A resolved link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Link {
     /// The speed negotiated.
     pub speed: Speed,
     /// Full duplex when true.
     pub full_duplex: bool,
+}
+
+impl Link {
+    /// A link at `speed`, full duplex when `full_duplex` is true.
+    pub const fn new(speed: Speed, full_duplex: bool) -> Link {
+        Link { speed, full_duplex }
+    }
 }

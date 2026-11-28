@@ -54,7 +54,7 @@ fn frames_arrive_in_order_through_more_than_one_lap_of_the_ring() {
         network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut out)),
         None
     );
-    assert_eq!(data_plane.dropped, 0);
+    assert_eq!(data_plane.dropped(), 0);
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn a_bad_frame_is_dropped_and_counted_without_stalling_the_ring() {
         .with(|r, t| data_plane.receive(r, t, &mut out))
         .unwrap();
     assert_eq!(&out[..n], &good[..]);
-    assert_eq!(data_plane.dropped, 1);
+    assert_eq!(data_plane.dropped(), 1);
 }
 
 /// A ring full of error frames is consumed in one call that returns `None`, counts every frame,
@@ -114,7 +114,7 @@ fn a_ring_full_of_error_frames_is_consumed_in_one_call_and_the_next_good_frame_a
         network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut out)),
         None
     );
-    assert_eq!(data_plane.dropped, u32::from(RECEIVE_ENTRIES - 1));
+    assert_eq!(data_plane.dropped(), u32::from(RECEIVE_ENTRIES - 1));
     let good = frame(90, 3);
     assert!(network_interface_controller.wire_in(&good));
     let n = network_interface_controller
@@ -208,9 +208,9 @@ fn an_error_frame_storm_ends_one_receive_call_at_its_budget() {
     let mut data_plane = DataPlane::new(PHYSICAL_ADDRESS);
     let mut out = vec![0u8; MAXIMUM_FRAME_BYTES];
     assert_eq!(data_plane.receive(&mut storm, &mut NoTails, &mut out), None);
-    assert_eq!(data_plane.dropped, u32::from(RECEIVE_ENTRIES));
+    assert_eq!(data_plane.dropped(), u32::from(RECEIVE_ENTRIES));
     assert_eq!(data_plane.receive(&mut storm, &mut NoTails, &mut out), None);
-    assert_eq!(data_plane.dropped, 2 * u32::from(RECEIVE_ENTRIES));
+    assert_eq!(data_plane.dropped(), 2 * u32::from(RECEIVE_ENTRIES));
 }
 
 #[test]
@@ -322,7 +322,8 @@ fn the_verdict_strips_the_crc_and_refuses_what_the_device_could_not_mean() {
         receive_verdict(ok | 3, MAXIMUM_FRAME_BYTES),
         ReceiveVerdict::Drop
     );
-    assert_eq!(receive_verdict(ok | 64, 59), ReceiveVerdict::Drop);
+    assert_eq!(receive_verdict(ok | 64, 59), ReceiveVerdict::NoRoom);
+    assert_eq!(receive_verdict(ok | 1519, 59), ReceiveVerdict::Drop);
     assert_eq!(
         receive_verdict(
             RECEIVE_DESCRIPTOR_WORD_3_FIRST_DESCRIPTOR | 64,
@@ -578,9 +579,10 @@ fn is_frame_waiting_reads_the_next_descriptor_and_takes_nothing() {
     assert!(network_interface_controller.with(|r, _| data_plane.is_frame_waiting(r)));
 }
 
-/// A frame longer than the room the caller offers is dropped and counted, as `receive` says.
+/// A frame longer than the room the caller offers is dropped and counted apart from bad frames,
+/// as `receive` says, so the caller can tell its short buffer from a bad frame.
 #[test]
-fn a_frame_longer_than_the_offered_room_is_dropped_and_counted() {
+fn a_frame_longer_than_the_offered_room_is_dropped_and_counted_apart() {
     let mut network_interface_controller =
         NetworkInterfaceController::new(PHYSICAL_ADDRESS, Memory::coherent(PHYSICAL_ADDRESS));
     network_interface_controller.program_rings_and_start(PHYSICAL_ADDRESS);
@@ -592,7 +594,31 @@ fn a_frame_longer_than_the_offered_room_is_dropped_and_counted() {
         network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut short)),
         None
     );
-    assert_eq!(data_plane.dropped, 1);
+    assert_eq!(data_plane.dropped(), 1);
+    assert_eq!(data_plane.dropped_for_lack_of_room(), 1);
+    assert!(network_interface_controller.wire_in_with_error(&frame(64, 2)));
+    assert_eq!(
+        network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut short)),
+        None
+    );
+    assert_eq!(data_plane.dropped(), 2);
+    assert_eq!(data_plane.dropped_for_lack_of_room(), 1);
+    let good = frame(60, 3);
+    assert!(network_interface_controller.wire_in(&good));
+    let n = network_interface_controller
+        .with(|r, t| data_plane.receive(r, t, &mut short))
+        .unwrap();
+    assert_eq!(&short[..n], &good[..]);
+    assert_eq!(data_plane.dropped_for_lack_of_room(), 1);
+    for seed in 4..6 {
+        assert!(network_interface_controller.wire_in(&frame(200, seed)));
+        assert_eq!(
+            network_interface_controller.with(|r, t| data_plane.receive(r, t, &mut short)),
+            None
+        );
+    }
+    assert_eq!(data_plane.dropped(), 4);
+    assert_eq!(data_plane.dropped_for_lack_of_room(), 3);
 }
 
 /// The three answers `receive_verdict` gives: a frame with the CRC stripped, a descriptor the
@@ -608,4 +634,21 @@ fn receive_verdict_strips_the_crc_waits_for_the_device_and_drops_a_length_it_cou
         ReceiveVerdict::NotYet
     );
     assert_eq!(receive_verdict(whole | 0x7fff, 1514), ReceiveVerdict::Drop);
+}
+
+/// Each speed answers its rate in megabits per second, and a link holds the speed and duplex it
+/// was made with.
+#[test]
+fn a_link_holds_its_speed_and_duplex_and_each_speed_answers_its_rate() {
+    use crate::link::{Link, Speed};
+    assert_eq!(Speed::Ten.megabits_per_second(), 10);
+    assert_eq!(Speed::Hundred.megabits_per_second(), 100);
+    assert_eq!(Speed::Thousand.megabits_per_second(), 1000);
+    let half = Link::new(Speed::Hundred, false);
+    assert_eq!(half.speed, Speed::Hundred);
+    assert!(!half.full_duplex);
+    let full = Link::new(Speed::Thousand, true);
+    assert_eq!(full.speed, Speed::Thousand);
+    assert!(full.full_duplex);
+    assert_ne!(half, full);
 }

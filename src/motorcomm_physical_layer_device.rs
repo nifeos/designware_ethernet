@@ -248,8 +248,12 @@ pub enum SettingsSource {
     Fallback,
 }
 
-/// **What the board wants of this physical layer device.**
+/// **What the board wants of this physical layer device.** Build one with [`Settings::new`] from
+/// a vendor tree's register values or a caller's own, or with [`Settings::from_mainline`] from
+/// mainline's quantities; the struct is `#[non_exhaustive]`, so a setting added later is not a
+/// break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Settings {
     /// The receive delay select, 0 to 15, in 150 ps steps.
     pub receive_delay: u8,
@@ -273,13 +277,44 @@ const FIXED_DELAY_PICOSECONDS: u32 = 1900;
 const STEP_PICOSECONDS: u32 = 150;
 
 impl Settings {
-    /// **These settings as one word**, for a process that hands them to another: bits 3:0 the
-    /// receive delay, 4 the fixed delay, 8:5 the transmit delay, 11:9 the three clock inversions
-    /// (10, 100 and 1000 Mbit/s from bit 9), 13:12 the source (0 vendor, 1 mainline, 2 fallback),
-    /// then the receive clock drive at bit 14 and the receive data drive at bit 39, each a tag bit
-    /// (0 a code, 1 microamps) and 24 bits of value above it. `None` when a select is past its
+    /// **Settings from their register values**, as the vendor tree states them or as a caller
+    /// chooses for its board: the receive and transmit delay selects (0 to 15, in 150 ps steps),
+    /// the receive clock's fixed extra delay, the two pad drives, the transmit clock inversion at
+    /// 10, 100 and 1000 Mbit/s, and which spelling they came from.
+    pub const fn new(
+        receive_delay: u8,
+        receive_fixed_delay: bool,
+        transmit_delay: u8,
+        receive_clock_drive: PadDriveStrength,
+        receive_data_drive: PadDriveStrength,
+        transmit_clock_inverted: [bool; 3],
+        source: SettingsSource,
+    ) -> Settings {
+        Settings {
+            receive_delay,
+            receive_fixed_delay,
+            transmit_delay,
+            receive_clock_drive,
+            receive_data_drive,
+            transmit_clock_inverted,
+            source,
+        }
+    }
+
+    /// **These settings as one word**: bits 3:0 the receive delay, 4 the fixed delay, 8:5 the
+    /// transmit delay, 11:9 the three clock inversions (10, 100 and 1000 Mbit/s from bit 9), 13:12
+    /// the source (0 vendor, 1 mainline, 2 fallback), then the receive clock drive at bit 14 and
+    /// the receive data drive at bit 39, each a tag bit (0 a code, 1 microamps) and 24 bits of
+    /// value above it. `None` when a select is past its
     /// field or a drive past 24 bits, which no tree this crate parses produces.
-    pub const fn to_word(&self) -> Option<u64> {
+    ///
+    /// Crate-private: a word a caller stores or sends fixes its layout, and the layout has no
+    /// version field. It opens only with one, in its top bits, and a layout frozen with it.
+    #[allow(
+        dead_code,
+        reason = "kept, tested, until a caller needs the word and it gains a version"
+    )]
+    pub(crate) const fn to_word(self) -> Option<u64> {
         const fn drive(d: PadDriveStrength) -> Option<u64> {
             match d {
                 PadDriveStrength::Code(c) => Some((c as u64) << 1),
@@ -316,7 +351,11 @@ impl Settings {
     }
 
     /// [`Settings::to_word`]'s inverse. `None` for a source past the three.
-    pub const fn from_word(word: u64) -> Option<Settings> {
+    #[allow(
+        dead_code,
+        reason = "kept, tested, until a caller needs the word and it gains a version"
+    )]
+    pub(crate) const fn from_word(word: u64) -> Option<Settings> {
         const fn drive(bits: u64) -> PadDriveStrength {
             let value = (bits >> 1) & 0xff_ffff;
             if bits & 1 == 0 {
@@ -460,6 +499,11 @@ pub(crate) const fn strapped_voltage_millivolts(chip_configuration: u16) -> u32 
 }
 
 /// Read extended register `extended`.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; nothing after it is sent.
 pub fn read_extended(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -477,6 +521,11 @@ pub fn read_extended(
 }
 
 /// Write extended register `extended`.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; nothing after it is sent.
 pub fn write_extended(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -535,6 +584,12 @@ pub struct Applied {
 /// restored at the end, as OpenBSD does, so a firmware access interleaved before or after finds
 /// it where it left it; it is restored when a step fails too, and the step's error is the one
 /// returned.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; the steps after it are not sent, and the
+/// extended-address port is still restored.
 pub fn configure(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -655,6 +710,11 @@ pub(crate) const REDUCED_GIGABIT_MEDIA_INDEPENDENT_INTERFACE_DELAY_AND_DRIVE_FIE
 /// **Set the transmit clock's inversion for the speed just negotiated**, OpenBSD's
 /// `ytphy_yt8521_update`. Returns the new RGMII configuration word. The extended-address port is
 /// saved and restored as [`configure`] does, on failure too.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; the extended-address port is still restored.
 pub fn apply_speed(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -681,6 +741,11 @@ pub fn apply_speed(
 /// **The link, if there is one**, read from the standard clause 22 registers the way OpenBSD's
 /// `ukphy_status` does. The basic mode status register is read twice, because its link bit
 /// latches low.
+///
+/// # Errors
+///
+/// [`management_data_io::Error::Timeout`] from the first
+/// MDIO transaction that does not complete; nothing after it is sent.
 pub fn read_link(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,

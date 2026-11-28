@@ -20,18 +20,83 @@ use crate::{Hardware, registers};
 /// field in [`registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER`].
 #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_SHIFT")]
 pub(crate) const CLOCK_RANGE_SHIFT: u32 = 8;
-/// **MDIO clock range for a 500 to 800 megahertz CSR clock** (`GMAC_MAC_MDIO_ADDR_CR_500_800`,
-/// `dwqereg.h`), the range this driver always programs: `0b0111`, which divides the CSR clock by
-/// 324 (Linux's `include/linux/stmmac.h`, `STMMAC_CSR_500_800M`).
+/// **The rate range of the control and status register (CSR) clock**, which sets the divider
+/// that makes the management data clock (MDC) from it. Each variant is the databook's clock
+/// range field value, as OpenBSD's `dwqereg.h` (`GMAC_MAC_MDIO_ADDR_CR_*`) and Linux's
+/// `include/linux/stmmac.h` (`STMMAC_CSR_*`) name them; the divider each picks is in its
+/// documentation.
 ///
-/// OpenBSD reads the `stmmaceth` clock's rate and picks the matching range. This driver assumes no
-/// clock framework to ask, and the choice only has to keep MDC at or under the standard's 2.5 megahertz:
-/// the largest divider does that for every CSR clock up to 810 megahertz and merely runs MDC slower
-/// below, which MDIO tolerates. So the driver needs no rate at all, at the cost of slower physical layer device
-/// register access during bring-up (tens of microseconds per access rather than a few), which is
-/// off every path that repeats.
-#[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_500_800")]
-pub(crate) const CLOCK_RANGE_500_TO_800_MEGAHERTZ: u32 = 7;
+/// The choice only has to keep MDC at or under the standard's 2.5 megahertz. The default, the
+/// largest divider, does that for every CSR clock up to 810 megahertz and merely runs MDC slower
+/// below, which MDIO tolerates, so a caller with no clock rate to ask needs none, at the cost of
+/// slower physical layer device register access during bring-up (tens of microseconds per access
+/// rather than a few). Linux and OpenBSD read the clock's rate and pick the matching range; a
+/// caller that knows its rate does the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+#[doc(alias = "csr_clock")]
+pub enum ClockRange {
+    /// 20 to 35 megahertz: the CSR clock divided by 16 (`GMAC_MAC_MDIO_ADDR_CR_20_35`).
+    #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_20_35")]
+    From20To35Megahertz,
+    /// 35 to 60 megahertz: divided by 26 (`GMAC_MAC_MDIO_ADDR_CR_35_60`).
+    #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_35_60")]
+    From35To60Megahertz,
+    /// 60 to 100 megahertz: divided by 42 (`GMAC_MAC_MDIO_ADDR_CR_60_100`).
+    #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_60_100")]
+    From60To100Megahertz,
+    /// 100 to 150 megahertz: divided by 62 (`GMAC_MAC_MDIO_ADDR_CR_100_150`).
+    #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_100_150")]
+    From100To150Megahertz,
+    /// 150 to 250 megahertz: divided by 102 (`GMAC_MAC_MDIO_ADDR_CR_150_250`).
+    #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_150_250")]
+    From150To250Megahertz,
+    /// 250 to 300 megahertz: divided by 124 (`GMAC_MAC_MDIO_ADDR_CR_250_300`).
+    #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_250_300")]
+    From250To300Megahertz,
+    /// 300 to 500 megahertz: divided by 204 (`GMAC_MAC_MDIO_ADDR_CR_300_500`).
+    #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_300_500")]
+    From300To500Megahertz,
+    /// 500 to 800 megahertz: divided by 324 (`GMAC_MAC_MDIO_ADDR_CR_500_800`), the largest
+    /// divider and the default.
+    #[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_500_800")]
+    #[default]
+    From500To800Megahertz,
+}
+
+impl ClockRange {
+    /// Every range, for the proofs and tests.
+    #[cfg(any(test, kani))]
+    pub(crate) const ALL: [ClockRange; 8] = [
+        ClockRange::From20To35Megahertz,
+        ClockRange::From35To60Megahertz,
+        ClockRange::From60To100Megahertz,
+        ClockRange::From100To150Megahertz,
+        ClockRange::From150To250Megahertz,
+        ClockRange::From250To300Megahertz,
+        ClockRange::From300To500Megahertz,
+        ClockRange::From500To800Megahertz,
+    ];
+
+    /// The clock range field's value, at most [`CLOCK_RANGE_FIELD_MASK`].
+    pub(crate) const fn field(self) -> u32 {
+        match self {
+            ClockRange::From60To100Megahertz => 0,
+            ClockRange::From100To150Megahertz => 1,
+            ClockRange::From20To35Megahertz => 2,
+            ClockRange::From35To60Megahertz => 3,
+            ClockRange::From150To250Megahertz => 4,
+            ClockRange::From250To300Megahertz => 5,
+            ClockRange::From300To500Megahertz => 6,
+            ClockRange::From500To800Megahertz => 7,
+        }
+    }
+}
+
+/// **The clock range field's mask**, four bits at [`CLOCK_RANGE_SHIFT`] (`GMAC_MAC_MDIO_ADDR_CR_MASK`,
+/// `dwqereg.h`, after the shift).
+#[doc(alias = "GMAC_MAC_MDIO_ADDR_CR_MASK")]
+pub(crate) const CLOCK_RANGE_FIELD_MASK: u32 = 0xf;
 /// **MDIO physical layer device address shift** (`GMAC_MAC_MDIO_ADDR_PA_SHIFT`, `dwqereg.h`).
 #[doc(alias = "GMAC_MAC_MDIO_ADDR_PA_SHIFT")]
 pub(crate) const PHYSICAL_LAYER_DEVICE_BUS_ADDRESS_SHIFT: u32 = 21;
@@ -174,7 +239,7 @@ pub(crate) const PHYSICAL_LAYER_DEVICE_ID_2_REGISTER: u8 = 0x03;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
-    /// The busy bit stayed set for [`COMMAND_LIMIT_MICROSECONDS`]: the MAC's CSR clock is off, or the
+    /// The busy bit stayed set for `COMMAND_LIMIT_MICROSECONDS`: the MAC's CSR clock is off, or the
     /// command never started.
     Timeout {
         /// The physical layer device addressed, by its bus address.
@@ -189,11 +254,12 @@ pub enum Error {
 /// the busy bit that starts it. Out-of-range addresses are reduced to the field (5 bits each)
 /// rather than spilling into the neighbors. It builds the word and sends nothing.
 pub(crate) const fn command_word(
+    clock_range: ClockRange,
     physical_layer_device_bus_address: u8,
     register: u8,
     write: bool,
 ) -> u32 {
-    (CLOCK_RANGE_500_TO_800_MEGAHERTZ << CLOCK_RANGE_SHIFT)
+    ((clock_range.field() & CLOCK_RANGE_FIELD_MASK) << CLOCK_RANGE_SHIFT)
         | (((physical_layer_device_bus_address & 0x1f) as u32)
             << PHYSICAL_LAYER_DEVICE_BUS_ADDRESS_SHIFT)
         | (((register & 0x1f) as u32) << REGISTER_BUS_ADDRESS_SHIFT)
@@ -211,12 +277,12 @@ pub(crate) const fn command_word(
 /// `command_word` names this constant. Each operand enters through its own field mask.
 #[allow(dead_code)]
 pub(crate) const COMMAND_WORD_FIELDS_DO_NOT_OVERLAP: () = assert!(
-    (CLOCK_RANGE_500_TO_800_MEGAHERTZ << CLOCK_RANGE_SHIFT)
+    (CLOCK_RANGE_FIELD_MASK << CLOCK_RANGE_SHIFT)
         | (0x1f << PHYSICAL_LAYER_DEVICE_BUS_ADDRESS_SHIFT)
         | (0x1f << REGISTER_BUS_ADDRESS_SHIFT)
         | (0x3 << 2)
         | COMMAND_BUSY
-        == (CLOCK_RANGE_500_TO_800_MEGAHERTZ << CLOCK_RANGE_SHIFT)
+        == (CLOCK_RANGE_FIELD_MASK << CLOCK_RANGE_SHIFT)
             ^ (0x1f << PHYSICAL_LAYER_DEVICE_BUS_ADDRESS_SHIFT)
             ^ (0x1f << REGISTER_BUS_ADDRESS_SHIFT)
             ^ (0x3 << 2)
@@ -243,8 +309,16 @@ pub(crate) const COMMAND_WORD_FIELDS_DO_NOT_OVERLAP: () = assert!(
 #[doc(alias = "mdio")]
 pub trait ManagementDataIo {
     /// Read register `register` of the physical layer device at `physical_layer_device_bus_address`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Timeout`] when the transaction does not complete.
     fn read(&mut self, physical_layer_device_bus_address: u8, register: u8) -> Result<u16, Error>;
     /// Write `value` to register `register` of the physical layer device at `physical_layer_device_bus_address`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Timeout`] when the transaction does not complete.
     fn write(
         &mut self,
         physical_layer_device_bus_address: u8,
@@ -254,14 +328,34 @@ pub trait ManagementDataIo {
 }
 
 /// The MAC's MDIO registers, through whatever [`Hardware`] reaches the controller.
-pub struct Bus<'a, H: Hardware>(pub &'a mut H);
+pub struct Bus<'a, H: Hardware> {
+    hardware: &'a mut H,
+    clock_range: ClockRange,
+}
+
+impl<'a, H: Hardware> Bus<'a, H> {
+    /// The MDIO bus of the controller `hardware` reaches, at the default [`ClockRange`], the
+    /// largest divider.
+    pub fn new(hardware: &'a mut H) -> Bus<'a, H> {
+        Bus::with_clock_range(hardware, ClockRange::default())
+    }
+
+    /// The MDIO bus of the controller `hardware` reaches, its clock divided for a CSR clock in
+    /// `clock_range`.
+    pub fn with_clock_range(hardware: &'a mut H, clock_range: ClockRange) -> Bus<'a, H> {
+        Bus {
+            hardware,
+            clock_range,
+        }
+    }
+}
 
 impl<H: Hardware> Bus<'_, H> {
     fn wait(&mut self, physical_layer_device_bus_address: u8, register: u8) -> Result<(), Error> {
         let mut waited = 0;
         loop {
             if self
-                .0
+                .hardware
                 .read(registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER)
                 & COMMAND_BUSY
                 == 0
@@ -274,7 +368,7 @@ impl<H: Hardware> Bus<'_, H> {
                     register,
                 });
             }
-            self.0.delay_microseconds(POLL_MICROSECONDS);
+            self.hardware.delay_microseconds(POLL_MICROSECONDS);
             waited += POLL_MICROSECONDS;
         }
     }
@@ -284,12 +378,19 @@ impl<H: Hardware> ManagementDataIo for Bus<'_, H> {
     fn read(&mut self, physical_layer_device_bus_address: u8, register: u8) -> Result<u16, Error> {
         // A command still running from someone else (firmware) would be overwritten mid-flight.
         self.wait(physical_layer_device_bus_address, register)?;
-        self.0.write(
+        self.hardware.write(
             registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER,
-            command_word(physical_layer_device_bus_address, register, false),
+            command_word(
+                self.clock_range,
+                physical_layer_device_bus_address,
+                register,
+                false,
+            ),
         );
         self.wait(physical_layer_device_bus_address, register)?;
-        Ok(self.0.read(registers::MAC_MANAGEMENT_DATA_IO_DATA_REGISTER) as u16)
+        Ok(self
+            .hardware
+            .read(registers::MAC_MANAGEMENT_DATA_IO_DATA_REGISTER) as u16)
     }
 
     fn write(
@@ -299,13 +400,18 @@ impl<H: Hardware> ManagementDataIo for Bus<'_, H> {
         value: u16,
     ) -> Result<(), Error> {
         self.wait(physical_layer_device_bus_address, register)?;
-        self.0.write(
+        self.hardware.write(
             registers::MAC_MANAGEMENT_DATA_IO_DATA_REGISTER,
             u32::from(value),
         );
-        self.0.write(
+        self.hardware.write(
             registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER,
-            command_word(physical_layer_device_bus_address, register, true),
+            command_word(
+                self.clock_range,
+                physical_layer_device_bus_address,
+                register,
+                true,
+            ),
         );
         self.wait(physical_layer_device_bus_address, register)
     }
@@ -313,6 +419,10 @@ impl<H: Hardware> ManagementDataIo for Bus<'_, H> {
 
 /// **The physical layer device's identifier**, `PHYSICAL_LAYER_DEVICE_ID_1_REGISTER << 16 | PHYSICAL_LAYER_DEVICE_ID_2_REGISTER`, revision included. It returns the
 /// identifier; `physical_layer_device_bus_address` is the bus address of the device to ask.
+///
+/// # Errors
+///
+/// [`Error::Timeout`] when either identifier read does not complete.
 #[doc(alias = "phy")]
 pub fn physical_layer_device_id(
     bus: &mut impl ManagementDataIo,
@@ -338,6 +448,10 @@ pub(crate) const PHYSICAL_LAYER_DEVICE_ID_HALVES_DO_NOT_OVERLAP: () =
 
 /// **Is the link up right now?** Two reads of the latched-low status bit, so a drop since the last
 /// look does not read as down forever and a link that is up now reads as up.
+///
+/// # Errors
+///
+/// [`Error::Timeout`] when either status read does not complete.
 pub fn is_link_up(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -355,6 +469,11 @@ pub fn is_link_up(
 
 /// **Restart autonegotiation**, advertising whatever the physical layer device's own defaults advertise (every speed
 /// on a gigabit part).
+///
+/// # Errors
+///
+/// [`Error::Timeout`] when the control register's read or write does not complete; after a failed
+/// read nothing is written.
 pub fn restart_autonegotiation(
     bus: &mut impl ManagementDataIo,
     physical_layer_device_bus_address: u8,
@@ -384,11 +503,31 @@ pub(crate) const AUTONEGOTIATION_ENABLE_AND_RESTART_DO_NOT_OVERLAP: () = assert!
 mod tests {
     use super::*;
 
+    /// The databook's field values, which put the four lowest rates out of rate order.
+    #[test]
+    fn each_clock_range_carries_the_databook_field_value() {
+        let fields = ClockRange::ALL.map(ClockRange::field);
+        assert_eq!(fields, [2, 3, 0, 1, 4, 5, 6, 7]);
+        assert_eq!(ClockRange::default().field(), 7);
+        for range in ClockRange::ALL {
+            let word = command_word(range, 0, 0, false);
+            assert_eq!(
+                (word >> CLOCK_RANGE_SHIFT) & CLOCK_RANGE_FIELD_MASK,
+                range.field()
+            );
+        }
+    }
+
     #[test]
     fn a_read_command_carries_the_largest_divider_the_bus_addresses_and_the_busy_bit() {
-        let c = command_word(0, PHYSICAL_LAYER_DEVICE_ID_1_REGISTER, false);
+        let c = command_word(
+            ClockRange::default(),
+            0,
+            PHYSICAL_LAYER_DEVICE_ID_1_REGISTER,
+            false,
+        );
         assert_eq!(c, 7 << 8 | 2 << 16 | 3 << 2 | 1);
-        let w = command_word(31, 31, true);
+        let w = command_word(ClockRange::default(), 31, 31, true);
         assert_eq!(w, 7 << 8 | 31 << 21 | 31 << 16 | 1 << 2 | 1);
     }
 
@@ -465,14 +604,14 @@ mod tests {
     fn a_read_issues_one_read_command_and_returns_the_data_register() {
         let mut hardware = Pair::new(0xbeef, 3);
         assert_eq!(
-            Bus(&mut hardware).read(4, BASIC_MODE_STATUS_REGISTER),
+            Bus::new(&mut hardware).read(4, BASIC_MODE_STATUS_REGISTER),
             Ok(0xbeef)
         );
         assert_eq!(
             hardware.writes,
             [(
                 registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER,
-                command_word(4, BASIC_MODE_STATUS_REGISTER, false)
+                command_word(ClockRange::default(), 4, BASIC_MODE_STATUS_REGISTER, false)
             )]
         );
         assert_eq!(
@@ -486,7 +625,7 @@ mod tests {
     fn a_write_puts_the_data_down_before_the_command_that_sends_it() {
         // The other order would send whatever the data register held before.
         let mut hardware = Pair::new(0, 2);
-        Bus(&mut hardware)
+        Bus::new(&mut hardware)
             .write(1, BASIC_MODE_CONTROL_REGISTER, 0x1200)
             .unwrap();
         assert_eq!(
@@ -495,7 +634,7 @@ mod tests {
                 (registers::MAC_MANAGEMENT_DATA_IO_DATA_REGISTER, 0x1200),
                 (
                     registers::MAC_MANAGEMENT_DATA_IO_BUS_ADDRESS_REGISTER,
-                    command_word(1, BASIC_MODE_CONTROL_REGISTER, true)
+                    command_word(ClockRange::default(), 1, BASIC_MODE_CONTROL_REGISTER, true)
                 )
             ]
         );
@@ -504,9 +643,9 @@ mod tests {
     #[test]
     fn a_command_still_busy_from_someone_else_is_waited_out_not_overwritten() {
         let mut hardware = Pair::new(0x1234, 2);
-        hardware.bus_address_register = command_word(7, 9, false); // firmware's read, in flight
+        hardware.bus_address_register = command_word(ClockRange::default(), 7, 9, false); // firmware's read, in flight
         assert_eq!(
-            Bus(&mut hardware).read(0, PHYSICAL_LAYER_DEVICE_ID_1_REGISTER),
+            Bus::new(&mut hardware).read(0, PHYSICAL_LAYER_DEVICE_ID_1_REGISTER),
             Ok(0x1234)
         );
         // Nothing was written until the firmware's command had cleared its busy bit.
@@ -520,7 +659,7 @@ mod tests {
         hardware.stuck = true;
         hardware.bus_address_register = COMMAND_BUSY;
         assert_eq!(
-            Bus(&mut hardware).read(3, BASIC_MODE_STATUS_REGISTER),
+            Bus::new(&mut hardware).read(3, BASIC_MODE_STATUS_REGISTER),
             Err(Error::Timeout {
                 physical_layer_device_bus_address: 3,
                 register: BASIC_MODE_STATUS_REGISTER
@@ -534,7 +673,7 @@ mod tests {
         let mut hardware = Pair::new(0, 0);
         hardware.stuck = true;
         assert_eq!(
-            Bus(&mut hardware).write(2, BASIC_MODE_CONTROL_REGISTER, 1),
+            Bus::new(&mut hardware).write(2, BASIC_MODE_CONTROL_REGISTER, 1),
             Err(Error::Timeout {
                 physical_layer_device_bus_address: 2,
                 register: BASIC_MODE_CONTROL_REGISTER
@@ -621,9 +760,13 @@ mod tests {
     #[test]
     fn a_bus_address_too_wide_for_its_field_does_not_spill_into_the_next() {
         // PHY 33 is PHY 1; it must not set bit 26, which is outside the 5-bit field.
-        assert_eq!(command_word(33, 0, false), command_word(1, 0, false));
         assert_eq!(
-            command_word(0, 0x3f, false) & (1 << PHYSICAL_LAYER_DEVICE_BUS_ADDRESS_SHIFT),
+            command_word(ClockRange::default(), 33, 0, false),
+            command_word(ClockRange::default(), 1, 0, false)
+        );
+        assert_eq!(
+            command_word(ClockRange::default(), 0, 0x3f, false)
+                & (1 << PHYSICAL_LAYER_DEVICE_BUS_ADDRESS_SHIFT),
             0
         );
     }

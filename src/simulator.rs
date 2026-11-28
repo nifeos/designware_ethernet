@@ -28,7 +28,8 @@ use crate::{
 const LINE: u64 = 64;
 
 /// The bus configuration the tests program: fixed bursts of 16 beats on each channel, threshold
-/// mode, every system bus burst length from 32 to 256 beats, and 15 outstanding requests each way.
+/// mode, every system bus burst length from 32 to 256 beats, 15 outstanding requests each way, and
+/// an MDIO clock range other than the default, so a test sees the bring-up pass it on.
 pub(crate) const BUS_CONFIGURATION: BusConfiguration = BusConfiguration {
     fixed_burst: true,
     channel_burst_beats_times_8: false,
@@ -42,6 +43,7 @@ pub(crate) const BUS_CONFIGURATION: BusConfiguration = BusConfiguration {
             | registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_BURST_32_BEATS_PERMITTED,
     read_outstanding: 0xf,
     write_outstanding: 0xf,
+    management_data_io_clock_range: crate::management_data_io::ClockRange::From250To300Megahertz,
 };
 
 /// The physical layer device settings the tests configure, as a caller's own defaults
@@ -378,6 +380,8 @@ pub(crate) struct NetworkInterfaceController {
     barriers: usize,
     /// The microseconds every delay so far has asked for: the simulation's clock.
     clock_microseconds: u64,
+    /// A step back the clock takes at one reading: how many readings until it, and how far.
+    clock_step_back: Option<(u32, u64)>,
     /// The microseconds and the number of delays asked for since the controller was made, which
     /// [`DELAY_BOUND_MICROSECONDS`] and [`DELAY_BOUND_CALLS`] bound.
     delayed: (u64, u64),
@@ -413,6 +417,7 @@ impl NetworkInterfaceController {
             wire: Vec::new(),
             barriers: 0,
             clock_microseconds: 0,
+            clock_step_back: None,
             delayed: (0, 0),
         };
         network_interface_controller.reset_registers();
@@ -463,6 +468,12 @@ impl NetworkInterfaceController {
     pub(crate) fn set_clock_microseconds(&mut self, microseconds: u64) {
         self.clock_microseconds = microseconds;
     }
+    /// After `readings` more readings, the clock steps back `microseconds`, as a caller's clock
+    /// that is not monotonic might, so a test can show no wait trusts it.
+    #[cfg(test)]
+    pub(crate) fn step_clock_back(&mut self, readings: u32, microseconds: u64) {
+        self.clock_step_back = Some((readings, microseconds));
+    }
     /// A register's current value.
     pub(crate) fn register(&self, offset: u32) -> u32 {
         self.registers.get(&offset).copied().unwrap_or(0)
@@ -499,7 +510,7 @@ impl NetworkInterfaceController {
             &id,
             &BUS_CONFIGURATION,
             region,
-            [0x6c, 0xcf, 0x39, 0, 0x47, 0x2c],
+            crate::StationMacAddress::new([0x6c, 0xcf, 0x39, 0, 0x47, 0x2c]).unwrap(),
         )
         .unwrap();
         controller::start(
@@ -776,6 +787,14 @@ impl crate::bring_up::Port for NetworkInterfaceController {
         self.with(f)
     }
     fn now_microseconds(&mut self) -> u64 {
+        if let Some((readings, microseconds)) = self.clock_step_back {
+            if readings == 0 {
+                self.clock_microseconds -= microseconds;
+                self.clock_step_back = None;
+            } else {
+                self.clock_step_back = Some((readings - 1, microseconds));
+            }
+        }
         self.clock_microseconds
     }
 }
@@ -789,7 +808,7 @@ mod tests {
         let mut network_interface_controller =
             NetworkInterfaceController::new(0, Memory::coherent(0));
         let id = management_data_io::physical_layer_device_id(
-            &mut management_data_io::Bus(&mut network_interface_controller),
+            &mut management_data_io::Bus::new(&mut network_interface_controller),
             0,
         )
         .unwrap();

@@ -97,14 +97,46 @@ pub enum TransmitError {
 /// the one just behind [`DataPlane::receive_cursor`], is always held back, so that "the device has
 /// every descriptor" and "the device has none" are never the same tail address; each received frame
 /// reposts it and holds back the slot just consumed.
+///
+/// # Examples
+///
+/// Post the receive ring, queue a frame, and poll. Here the region is ordinary memory and the
+/// tails go nowhere, so nothing answers:
+///
+/// ```
+/// use designware_ethernet::{
+///     DataPlane, DirectMemoryAccessRegion, MAXIMUM_FRAME_BYTES, Tails, layout,
+/// };
+/// # struct Memory(Vec<u8>);
+/// # impl DirectMemoryAccessRegion for Memory {
+/// #     fn read_u64(&self, at: u64) -> u64 { let mut b = [0; 8]; self.read_bytes(at, &mut b); u64::from_le_bytes(b) }
+/// #     fn write_u64(&mut self, at: u64, value: u64) { self.write_bytes(at, &value.to_le_bytes()) }
+/// #     fn read_bytes(&self, at: u64, out: &mut [u8]) { out.copy_from_slice(&self.0[at as usize..][..out.len()]) }
+/// #     fn write_bytes(&mut self, at: u64, from: &[u8]) { self.0[at as usize..][..from.len()].copy_from_slice(from) }
+/// # }
+/// # struct NoDevice;
+/// # impl Tails for NoDevice {
+/// #     fn set_receive_tail(&mut self, _: u32) {}
+/// #     fn set_transmit_tail(&mut self, _: u32) {}
+/// #     fn barrier(&mut self) {}
+/// # }
+/// let mut region = Memory(vec![0; layout::DIRECT_MEMORY_ACCESS_REGION_BYTES as usize]);
+/// let mut tails = NoDevice;
+/// let mut data_plane = DataPlane::new(0x4000_0000);
+/// data_plane.start(&mut region, &mut tails);
+/// data_plane.transmit(&mut region, &mut tails, &[0xff; 60]).unwrap();
+/// let mut frame = [0; MAXIMUM_FRAME_BYTES];
+/// assert_eq!(data_plane.receive(&mut region, &mut tails, &mut frame), None);
+/// assert_eq!(data_plane.dropped(), 0);
+/// ```
 #[derive(Debug)]
 pub struct DataPlane {
     physical_address: u64,
     receive_next: u16,
     transmit_next: u16,
     transmit_clean: u16,
-    /// Frames the device wrote that were not delivered.
-    pub dropped: u32,
+    dropped: u32,
+    dropped_for_lack_of_room: u32,
 }
 
 impl DataPlane {
@@ -117,7 +149,22 @@ impl DataPlane {
             transmit_next: 0,
             transmit_clean: 0,
             dropped: 0,
+            dropped_for_lack_of_room: 0,
         }
+    }
+
+    /// Frames the device wrote that were not delivered, for any reason, wrapping at `u32::MAX`.
+    /// It includes [`DataPlane::dropped_for_lack_of_room`].
+    pub fn dropped(&self) -> u32 {
+        self.dropped
+    }
+
+    /// Of [`DataPlane::dropped`], the good frames lost because the caller's `out` was shorter than
+    /// the frame, wrapping at `u32::MAX`. It stays zero for a caller that always offers
+    /// [`MAXIMUM_FRAME_BYTES`]; the rest of `dropped` is frames the device marked bad or could not
+    /// have meant.
+    pub fn dropped_for_lack_of_room(&self) -> u32 {
+        self.dropped_for_lack_of_room
     }
 
     /// The receive descriptor the next [`DataPlane::receive`] looks at.
@@ -171,9 +218,9 @@ impl DataPlane {
     /// [`RECEIVE_ENTRIES`] descriptors, so a device that keeps refilling the ring with error frames
     /// makes it return `None` and the caller polls again.
     ///
-    /// `out` is judged as the room for the frame: a frame longer than `out.len()` is dropped like a
-    /// bad one, consumed, counted and gone, so offer [`MAXIMUM_FRAME_BYTES`] unless losing longer
-    /// frames is wanted.
+    /// `out` must hold [`MAXIMUM_FRAME_BYTES`] for no good frame to be lost. A frame longer than
+    /// `out.len()` is consumed and gone, counted in both `dropped` and
+    /// [`DataPlane::dropped_for_lack_of_room`], so a caller can tell its short buffer from a bad frame.
     pub fn receive(
         &mut self,
         region: &mut impl DirectMemoryAccessRegion,
@@ -195,7 +242,12 @@ impl DataPlane {
                     region.read_bytes(layout::receive_buffer(self.receive_next), &mut out[..n]);
                     Some(n)
                 }
-                _ => {
+                ReceiveVerdict::NoRoom => {
+                    self.dropped = self.dropped.wrapping_add(1);
+                    self.dropped_for_lack_of_room = self.dropped_for_lack_of_room.wrapping_add(1);
+                    None
+                }
+                ReceiveVerdict::Drop | ReceiveVerdict::NotYet => {
                     self.dropped = self.dropped.wrapping_add(1);
                     None
                 }
@@ -229,6 +281,12 @@ impl DataPlane {
     }
 
     /// Queue `frame` for transmission.
+    ///
+    /// # Errors
+    ///
+    /// [`TransmitError::BadLength`] when `frame` is empty or longer than [`MAXIMUM_FRAME_BYTES`],
+    /// and [`TransmitError::Full`] when every transmit descriptor is still the device's; nothing is
+    /// queued either way.
     pub fn transmit(
         &mut self,
         region: &mut impl DirectMemoryAccessRegion,

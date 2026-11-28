@@ -5,20 +5,24 @@
 [![license](https://img.shields.io/badge/license-%28MIT%20OR%20Apache--2.0%29%20AND%20ISC%20AND%20BSD--2--Clause-blue.svg)](https://github.com/partsfoundry/designware_ethernet#license)
 [![minimum Rust version](https://img.shields.io/badge/rust-1.88%2B-blue.svg)](https://github.com/partsfoundry/designware_ethernet/blob/main/Cargo.toml)
 
-The logic of a driver for the Synopsys DesignWare Ethernet QoS controller (dwmac 4.x and 5.x
+The logic of a driver for the Synopsys `DesignWare` Ethernet `QoS` controller (dwmac 4.x and 5.x
 descriptor format) and its Motorcomm `YT8531` physical layer device. It holds the register map, the descriptor formats, the direct memory access (DMA)
 region's layout, the receive and transmit rings, and the controller and physical layer device bring-up sequences. It
 also holds MDIO (management data input/output) and a probe that measures whether device DMA is
 coherent with the CPU's caches. It knows no system-on-chip: the register window, the bus
 configuration (`network_interface_controller::BusConfiguration`) and the physical layer device's
 settings come from the caller in `bring_up::Inputs`, and `Settings::from_mainline` converts the
-mainline device-tree spelling of the delays and drive currents. It has run on a StarFive
-VisionFive 2. It is `no_std` and needs no allocator.
+mainline device-tree spelling of the delays and drive currents. No test has touched the device
+yet: every test runs against a simulated controller. It is `no_std` and needs no allocator.
 
 It dereferences no pointer and touches no hardware. You supply register access through the
 `Hardware` trait, the DMA region through `DirectMemoryAccessRegion`, and the tail-pointer writes and
 barrier through `Tails`; the tests run all of it against a simulated controller. It does not support
 the older 3.x GMAC (gigabit media access controller).
+
+`bring_up::bring_up_with_motorcomm_yt8531` runs the whole bring-up for a board whose physical
+layer device is a Motorcomm `YT8531`; a board with another device drives the controller through
+the functions of `network_interface_controller` and `management_data_io`, as that bring-up does.
 
 ## EXAMPLES
 
@@ -58,7 +62,7 @@ let mut tails = NoDevice;
 let mut data_plane = DataPlane::new(0x4000_0000); // the region's physical address
 data_plane.start(&mut region, &mut tails); // posts the receive buffers
 data_plane.transmit(&mut region, &mut tails, &[0xff; 60]).unwrap();
-let mut frame_buffer = [0u8; 1514];
+let mut frame_buffer = [0u8; designware_ethernet::MAXIMUM_FRAME_BYTES];
 assert_eq!(data_plane.receive(&mut region, &mut tails, &mut frame_buffer), None);
 ```
 
@@ -79,9 +83,10 @@ Six Kani harnesses, in `src/proofs.rs`:
 - `a_transmit_descriptor_keeps_its_length_inside_its_fields`: for every buffer address and length,
   the transmit descriptor carries the address untouched, the device owns it, it is the first and
   last segment, and the length fits its two fields without reaching a flag bit.
-- `a_management_data_io_command_word_keeps_each_bus_address_in_its_own_field`: for every physical layer device and register address,
-  the command word holds each in its own five-bit field, says read or write as asked and sets the
-  busy bit.
+- `a_management_data_io_command_word_keeps_each_bus_address_in_its_own_field`: for every physical
+  layer device and register address and every MDIO clock range, the command word holds each
+  address in its own five-bit field and the range in its own. It says read or write as asked and
+  sets the busy bit.
 - `a_coherent_verdict_needs_every_account_to_agree`: for every observation, a fatal bus error gives
   the bus error verdict, and the coherent verdict needs the receive descriptor handed back, the
   payload to match the probe frame and the delivered length to be the probe's.

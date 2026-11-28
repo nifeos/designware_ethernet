@@ -8,6 +8,7 @@
 //! against `simulator`'s controller.
 
 use crate::link::{Link, Speed};
+use crate::management_data_io::ClockRange;
 use crate::{BUFFER_BYTES, Hardware, RECEIVE_ENTRIES, TRANSMIT_ENTRIES, layout, registers};
 
 /// Why the controller was not brought up.
@@ -35,7 +36,7 @@ pub const RESET_LIMIT_MICROSECONDS: u64 = 300_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Identity {
-    /// [`registers::CORE_VERSION_REGISTER`].
+    /// `registers::CORE_VERSION_REGISTER`.
     pub version: u32,
     /// The four hardware feature registers.
     pub features: [u32; 4],
@@ -90,6 +91,11 @@ const fn queue_bytes(field: u32) -> u32 {
 }
 
 /// **Reset the whole controller** and wait for the reset to finish. Returns how long it took.
+///
+/// # Errors
+///
+/// [`Error::ResetTimeout`] when the reset bit has not cleared within the reset limit, usually
+/// because the physical layer device's receive clock is missing.
 pub fn soft_reset(hardware: &mut impl Hardware) -> Result<u64, Error> {
     let mode = hardware.read(registers::DIRECT_MEMORY_ACCESS_BUS_MODE_REGISTER);
     hardware.write(
@@ -112,22 +118,53 @@ pub fn soft_reset(hardware: &mut impl Hardware) -> Result<u64, Error> {
     }
 }
 
+/// **An address a station can own**: six octets in transmission order that are not all zero, not
+/// all ones (the address registers' reset value) and not multicast (the low bit of the first octet
+/// clear). The only way to make one is [`StationMacAddress::new`], so every address the driver
+/// programs has passed that check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[doc(alias = "mac_address")]
+pub struct StationMacAddress([u8; 6]);
+
+impl StationMacAddress {
+    /// `octets` as a station address, or `None` when they are all zero, all ones, or multicast.
+    pub const fn new(octets: [u8; 6]) -> Option<StationMacAddress> {
+        let all_zero = u64::from_le_bytes([
+            octets[0], octets[1], octets[2], octets[3], octets[4], octets[5], 0, 0,
+        ]) == 0;
+        let all_ones = u64::from_le_bytes([
+            octets[0], octets[1], octets[2], octets[3], octets[4], octets[5], 0xff, 0xff,
+        ]) == u64::MAX;
+        if all_zero || all_ones || octets[0] & 1 != 0 {
+            return None;
+        }
+        Some(StationMacAddress(octets))
+    }
+
+    /// The six octets, in transmission order.
+    pub const fn octets(self) -> [u8; 6] {
+        self.0
+    }
+}
+
+impl From<StationMacAddress> for [u8; 6] {
+    fn from(station: StationMacAddress) -> [u8; 6] {
+        station.0
+    }
+}
+
 /// **The station address in the two address registers**, OpenBSD's `dwqe_lladdr_read` byte order,
-/// or `None` when they hold nothing a station could own: all zero or all ones (the reset value),
-/// or a multicast address.
-pub fn station_mac_address(high: u32, low: u32) -> Option<[u8; 6]> {
+/// or `None` when they hold nothing [`StationMacAddress::new`] accepts.
+pub fn station_mac_address(high: u32, low: u32) -> Option<StationMacAddress> {
     let [byte_0, byte_1, byte_2, byte_3] = low.to_le_bytes();
     let [byte_4, byte_5, _, _] = high.to_le_bytes();
-    let station_mac_address = [byte_0, byte_1, byte_2, byte_3, byte_4, byte_5];
-    if station_mac_address == [0; 6] || station_mac_address == [0xff; 6] || byte_0 & 1 != 0 {
-        return None;
-    }
-    Some(station_mac_address)
+    StationMacAddress::new([byte_0, byte_1, byte_2, byte_3, byte_4, byte_5])
 }
 
 /// The two address register words for `station_mac_address`: `(high, low)`, OpenBSD's
 /// `dwqe_lladdr_write`.
-pub(crate) const fn mac_address_words(station_mac_address: [u8; 6]) -> (u32, u32) {
+pub(crate) const fn mac_address_words(station_mac_address: StationMacAddress) -> (u32, u32) {
+    let station_mac_address = station_mac_address.octets();
     (
         u32::from_le_bytes([station_mac_address[4], station_mac_address[5], 0, 0]),
         u32::from_le_bytes([
@@ -142,7 +179,11 @@ pub(crate) const fn mac_address_words(station_mac_address: [u8; 6]) -> (u32, u32
 /// **How the DMA meets the bus**: the `snps,*` properties of a board's node and its
 /// `snps,axi-config`. The crate holds no board's; the caller reads it from the board's device
 /// tree, or carries it, and passes it in [`crate::bring_up::Inputs`].
+///
+/// Build one with [`BusConfiguration::new`] and set each field the board's tree states; the
+/// struct is `#[non_exhaustive]`, so a setting added later is not a break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BusConfiguration {
     /// `snps,fixed-burst`.
     pub fixed_burst: bool,
@@ -165,6 +206,34 @@ pub struct BusConfiguration {
     pub read_outstanding: u32,
     /// `snps,wr_osr_lmt`.
     pub write_outstanding: u32,
+    /// The CSR clock's rate range, which sets the MDIO clock's divider. Not a DMA setting, but the
+    /// tree states it beside them (as the `stmmaceth` clock's rate, or `snps,clk-csr`).
+    #[doc(alias = "clk_csr")]
+    pub management_data_io_clock_range: ClockRange,
+}
+
+impl BusConfiguration {
+    /// Both channels' burst lengths, in beats (`snps,txpbl` and `snps,rxpbl`), with every other
+    /// setting off or zero: no fixed burst, no eight-times multiplier, store and forward rather
+    /// than threshold mode, no system bus burst length permitted, both outstanding request limits
+    /// zero, and the default MDIO clock range (the largest divider). Set the fields the board's
+    /// tree states after it.
+    pub const fn new(
+        transmit_channel_burst_beats: u32,
+        receive_channel_burst_beats: u32,
+    ) -> BusConfiguration {
+        BusConfiguration {
+            fixed_burst: false,
+            channel_burst_beats_times_8: false,
+            transmit_channel_burst_beats,
+            receive_channel_burst_beats,
+            threshold_mode: false,
+            bus_burst_beats_permitted: 0,
+            read_outstanding: 0,
+            write_outstanding: 0,
+            management_data_io_clock_range: ClockRange::From500To800Megahertz,
+        }
+    }
 }
 
 /// The receive operation mode word for a queue of `queue_bytes` bytes, OpenBSD's arithmetic: the
@@ -366,12 +435,42 @@ fn program_descriptor_rings(hardware: &mut impl Hardware, region: u64) {
 /// says `rx-fifo-depth = <262144>` and mainline says `<2048>` for the same silicon, and a queue
 /// size computed from the first would overflow the field into the next. The hardware's statement
 /// is the one fact about the queue memory both trees are describing.
+///
+/// # Errors
+///
+/// [`Error::RegionOutOfReach`] when `region_physical_address` is past the controller's address
+/// width or the region straddles a 4 GiB boundary; no register is written then.
+///
+/// # Examples
+///
+/// A stand-in controller reads every register as zero, which states a 32-bit DMA, so a region
+/// that straddles 4 GiB is refused:
+///
+/// ```
+/// use designware_ethernet::network_interface_controller::{BusConfiguration, Error, Identity, configure};
+/// use designware_ethernet::{Hardware, StationMacAddress};
+/// struct Zeroes;
+/// impl Hardware for Zeroes {
+///     fn read(&mut self, _offset: u32) -> u32 { 0 }
+///     fn write(&mut self, _offset: u32, _value: u32) {}
+///     fn delay_microseconds(&mut self, _microseconds: u64) {}
+/// }
+/// let mut hardware = Zeroes;
+/// let id = Identity::read(&mut hardware);
+/// let station = StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).unwrap();
+/// let bus = BusConfiguration::new(16, 16);
+/// configure(&mut hardware, &id, &bus, 0x4000_0000, station).unwrap();
+/// assert!(matches!(
+///     configure(&mut hardware, &id, &bus, 0xffff_f000, station),
+///     Err(Error::RegionOutOfReach { .. })
+/// ));
+/// ```
 pub fn configure(
     hardware: &mut impl Hardware,
     id: &Identity,
     bus: &BusConfiguration,
     region_physical_address: u64,
-    station_mac_address: [u8; 6],
+    station_mac_address: StationMacAddress,
 ) -> Result<(), Error> {
     if !is_region_in_reach(
         region_physical_address,
@@ -574,6 +673,12 @@ const TRANSMIT_FLUSH_LIMIT_MICROSECONDS: u32 = 10_000;
 
 /// **Stop the MAC and both DMA channels**, OpenBSD's `dwqe_down` order: receiver off, receive DMA
 /// off, transmit DMA off, flush the transmit queue, transmitter off.
+///
+/// # Errors
+///
+/// [`Error::FlushTimeout`] when the transmit queue has not finished flushing within the flush
+/// limit; the receiver and both DMA channels are already off, and the transmitter is turned off
+/// regardless.
 pub fn stop(hardware: &mut impl Hardware) -> Result<(), Error> {
     let configuration = hardware.read(registers::MAC_CONFIGURATION_REGISTER);
     hardware.write(
@@ -625,7 +730,8 @@ mod tests {
     use crate::simulator::{BUS_CONFIGURATION, Memory, NetworkInterfaceController};
 
     const PHYSICAL_ADDRESS: u64 = 0x4800_0000;
-    const STATION_MAC_ADDRESS: [u8; 6] = [0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c];
+    const STATION_MAC_ADDRESS: StationMacAddress =
+        StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).unwrap();
 
     #[test]
     fn a_reset_that_completes_reports_how_long_it_took() {
@@ -663,6 +769,24 @@ mod tests {
         assert_eq!(station_mac_address(0xffff_ffff, 0xffff_ffff), None);
         assert_eq!(station_mac_address(0, 0), None);
         assert_eq!(station_mac_address(0, 1), None, "multicast");
+        assert_eq!(
+            StationMacAddress::new([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c]).map(<[u8; 6]>::from),
+            Some([0x6c, 0xcf, 0x39, 0x00, 0x47, 0x2c])
+        );
+        assert_eq!(StationMacAddress::new([0; 6]), None);
+        assert_eq!(StationMacAddress::new([0xff; 6]), None);
+        assert_eq!(
+            StationMacAddress::new([0x01, 0, 0, 0, 0, 1]),
+            None,
+            "multicast"
+        );
+        assert_eq!(
+            StationMacAddress::new([0xff, 0xff, 0xff, 0xff, 0xff, 0xfe]),
+            None,
+            "multicast"
+        );
+        assert!(StationMacAddress::new([0xfe, 0xff, 0xff, 0xff, 0xff, 0xff]).is_some());
+        assert!(StationMacAddress::new([0, 0, 0, 0, 0, 1]).is_some());
     }
 
     #[test]
@@ -953,6 +1077,7 @@ mod tests {
             registers::DIRECT_MEMORY_ACCESS_SYSTEM_BUS_MODE_BURST_32_BEATS_PERMITTED,
         read_outstanding: 0x13,
         write_outstanding: 0x25,
+        management_data_io_clock_range: ClockRange::From20To35Megahertz,
     };
     const THIRTY_TWO_BIT: Identity = Identity {
         version: 0x1052,
