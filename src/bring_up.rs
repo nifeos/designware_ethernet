@@ -759,8 +759,7 @@ mod tests {
             assert!(matches!(account.coherence, Some((Verdict::Coherent, _))));
             assert!(
                 account.link_wait_milliseconds >= LINK_WAIT_MILLISECONDS - 1,
-                "a step back at reading {readings}: {}",
-                account.link_wait_milliseconds
+                "a step back at reading {readings} ended the link wait early"
             );
         }
     }
